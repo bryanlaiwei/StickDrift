@@ -101,9 +101,9 @@ def baseline_unit(ins: dict) -> str:
 
 def _resident_facts(p: dict, full: bool) -> str:
     ins = p["insights"]
-    games, garden = p.get("game_sessions", []), p.get("garden_sessions", [])
+    games = p.get("game_sessions", [])
     unit = baseline_unit(ins)
-    activity = [f"{len(games)} game visits", f"{len(garden)} garden visits"]
+    activity = [f"{len(games)} game visits"]
     if p["sessions"]:
         activity.append(f"{len(p['sessions'])} earlier reaction-test sessions")
     lines = [f"RESIDENT: {p['display_name']} (dominant hand: {p['dominant_hand']}, recorded activity: "
@@ -130,9 +130,6 @@ def _resident_facts(p: dict, full: bool) -> str:
         if len(pad) < len(games):
             lines.append(f"  {len(games) - len(pad)} other game visits used keyboard input instead of the controller. "
                          "They do not reflect thumb movement, so their measurements are left out.")
-    if garden:
-        lines.append(f"Garden visits (newest first, {len(garden)} total):")
-        lines += [f"  {_garden_line(g)}" for g in garden[: 10 if full else 1]]
     if full and p["sessions"]:
         lines.append("Reaction-test session history (newest first):")
         lines += [f"  {_session_line(s)}" for s in p["sessions"][:30]]
@@ -199,22 +196,6 @@ def _game_line(g: dict) -> str:
         parts.append(f"rat timing: median {rat['median_reaction_s']:.2f}s nose-to-slam")
     return f"{_when(g['started_at'])}{' [keyboard input]' if g.get('is_synthetic') else ''} - " + " | ".join(
         parts or ["no games played"])
-
-
-def _garden_line(g: dict) -> str:
-    """One garden visit as text: chapters, reach and tracking per hand, pattern scores."""
-    parts = [f"{g.get('levels_completed') or 0}/{g.get('levels_total') or 4} chapters finished"]
-    hands = (g.get("live") or {}).get("hands")
-    for label, k, f in (("reaction", "reaction_s", _secs), ("time to reach", "reach_s", _secs),
-                        ("distance from target", "tracking_error", _pct), ("time on target", "on_target", _pct)):
-        v = _lr(hands, k, f)
-        if v:
-            parts.append(f"{label} {v}")
-    scores = (g.get("tcn") or {}).get("scores") or {}
-    pattern = [f"{PATTERN_LABELS[k].lower()} {v:.0f}/100" for k, v in scores.items() if v is not None and k in PATTERN_LABELS]
-    if pattern:
-        parts.append("pattern model (resemblance, not diagnosis): " + ", ".join(pattern))
-    return f"{_when(g['started_at'])}{' [simulated input]' if g.get('is_synthetic') else ''} - " + " | ".join(parts)
 
 
 def build_facts(profiles: List[dict], focus: Optional[dict]) -> str:

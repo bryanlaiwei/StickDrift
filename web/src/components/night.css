@@ -102,7 +102,6 @@
 [data-room='night'] .review-ok { background: var(--accent-soft); }
 [data-room='night'] .risk-alert-none { background: var(--accent-soft); }
 [data-room='night'] .chart-svg .chart-dot { stroke: var(--surface); }
-[data-room='night'] .garden-chart { background: var(--bg); }
 
 /* ---- page headings: an eyebrow tag and a big rounded title ---- */
 [data-room='night'] .page-title h1,

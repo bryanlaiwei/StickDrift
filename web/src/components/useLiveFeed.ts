@@ -4,7 +4,7 @@ import { api, type LiveSample, type LiveSnapshot, type LiveStatus } from '../api
 const KEEP = 100 * 40 // samples kept for the charts (~40 s)
 const DELAY_MS = 150 // jitter buffer: samples play back this far behind their arrival, evenly spaced
 const MAX_GAP_S = 0.1 // longest pause played back between two samples (level changes reset the game clock)
-const DONE: LiveStatus[] = ['finished', 'failed', 'stopped', 'lost', 'ended']
+const DONE: LiveStatus[] = ['finished', 'failed', 'lost', 'ended']
 
 export type FeedMode = 'connecting' | 'live' | 'polling'
 

@@ -7,24 +7,17 @@ import { handPoint, handPos, handTarget, levelName, pct, secs } from '../compone
 import { TabPanel, Tabs } from '../components/Tabs'
 import { useLiveFeed } from '../components/useLiveFeed'
 
-const DONE: LiveStatus[] = ['finished', 'failed', 'stopped', 'lost', 'ended']
+const DONE: LiveStatus[] = ['finished', 'failed', 'lost', 'ended']
 
 const STATUS_TEXT: Record<LiveStatus, string> = {
-  starting: 'Opening the game',
-  waiting: 'Waiting for the controller',
-  ready: 'Between chapters',
+  ready: 'In the lobby',
   playing: 'Playing',
-  paused: 'On a break',
-  saving: 'Saving the session',
   scoring: 'Judging with the pattern model',
   finished: 'Session judged',
   failed: 'Could not judge',
-  stopped: 'Closed early',
   lost: 'Connection lost',
   ended: 'Session finished',
 }
-
-const CHAPTERS = ['apples', 'butterfly_left', 'butterfly_right', 'water']
 
 function elapsed(s: number) {
   const m = Math.floor(s / 60)
@@ -50,7 +43,7 @@ function Tile({ label, left, right, hint }: { label: string; left: string; right
   )
 }
 
-function tiles(h: { left: HandLive; right: HandLive }, lobby: boolean) {
+function tiles(h: { left: HandLive; right: HandLive }) {
   const both = (f: (x: HandLive) => string) => [f(h.left), f(h.right)] as const
   const shake = (x: HandLive) => (x.shake == null ? '—' : `${(x.shake * 100).toFixed(1)}%${x.shake_hz ? ` · ${x.shake_hz} Hz` : ''}`)
   const change = (x: HandLive) =>
@@ -60,24 +53,22 @@ function tiles(h: { left: HandLive; right: HandLive }, lobby: boolean) {
       {
         label: 'Reaction time',
         vals: both((x) => secs(x.reaction_s)),
-        hint: lobby ? 'Target appears → stick pushed toward it' : 'Apple appears → stick starts moving',
+        hint: 'Target appears → stick pushed toward it',
       },
       {
-        label: lobby ? 'Time to pick / slam' : 'Time to reach',
+        label: 'Time to pick / slam',
         vals: both((x) => secs(x.reach_s)),
-        hint: lobby ? 'Apple Picking: until the glove grabs it · Rat Catching: until the flick' : undefined,
+        hint: 'Apple Picking: until the glove grabs it · Rat Catching: until the flick',
       },
       { label: 'Peak speed', vals: both((x) => (x.peak_speed == null ? '—' : `${x.peak_speed.toFixed(1)} tilts/s`)) },
-      lobby
-        ? { label: 'Stick push', vals: both((x) => pct(x.reach_size)), hint: 'How far the stick was pushed, at most' }
-        : { label: 'Reach size', vals: both((x) => pct(x.reach_size)), hint: 'Furthest point ÷ distance to the apple' },
+      { label: 'Stick push', vals: both((x) => pct(x.reach_size)), hint: 'How far the stick was pushed, at most' },
       {
-        label: lobby ? 'Speed, first → last tries' : 'Speed, first → last apples',
+        label: 'Speed, first → last tries',
         vals: both(change),
         hint: 'Negative = slowing down as it went on',
       },
       {
-        label: lobby ? 'Apples picked / rats caught' : 'Apples picked',
+        label: 'Apples picked / rats caught',
         vals: both((x) => (x.apples_total ? `${x.apples_reached}/${x.apples_total}` : '—')),
       },
     ],
@@ -85,7 +76,7 @@ function tiles(h: { left: HandLive; right: HandLive }, lobby: boolean) {
       {
         label: 'Distance from target',
         vals: both((x) => pct(x.tracking_error)),
-        hint: lobby ? 'Fishing lure to the lane, as a share of the water' : 'Share of full stick range',
+        hint: 'Fishing lure to the lane, as a share of the water',
       },
       { label: 'Time on target', vals: both((x) => pct(x.on_target)) },
       { label: 'Shake', vals: both(shake), hint: 'Leftover wobble after the smooth path · rhythm' },
@@ -117,12 +108,9 @@ export default function LiveSession() {
   }
 
   const live = !DONE.includes(snap.status) && snap.status !== 'scoring'
-  const lobby = snap.levels.includes('lobby')
-  const t = tiles(snap.metrics.hands, lobby)
+  const t = tiles(snap.metrics.hands)
   const reachTrials = snap.metrics.reach_trials
-  const judged =
-    snap.status === 'scoring' || snap.status === 'saving' || Boolean(snap.result) ||
-    snap.status === 'failed' || snap.status === 'stopped' || snap.status === 'lost'
+  const judged = snap.status === 'scoring' || Boolean(snap.result) || snap.status === 'failed' || snap.status === 'lost'
   const replayReady = Boolean(snap.db_session_id && snap.hand_replay_ready)
 
   return (
@@ -134,7 +122,7 @@ export default function LiveSession() {
 
       <div className="page-head">
         <div>
-          <p className="step">{live ? 'Live session' : lobby ? 'Game session' : 'Garden session'}</p>
+          <p className="step">{live ? 'Live session' : 'Game session'}</p>
           <h1>
             {snap.name}{' '}
             <span className={`live-pill live-${snap.status}`}>
@@ -150,14 +138,13 @@ export default function LiveSession() {
                 {mode === 'live' ? 'Streaming' : mode === 'polling' ? 'Refreshing' : 'Connecting…'}
               </span>
             )}
-            {snap.trial != null && snap.level === 'apples' ? ` · apple ${snap.trial}` : ''}
             {snap.synthetic && <span className="badge badge-synthetic">Keyboard / simulated input</span>}
           </p>
         </div>
       </div>
 
-      <ol className="chapter-track" aria-label="Chapters">
-        {(snap.levels.some((l) => l !== 'lobby') ? snap.levels.filter((l) => l !== 'lobby') : CHAPTERS).map((c) => {
+      <ol className="chapter-track" aria-label="Games">
+        {snap.levels.filter((l) => l !== 'lobby').map((c) => {
           const state = snap.levels_done.includes(c) ? 'done' : snap.level === c ? 'now' : 'todo'
           return (
             <li key={c} className={`chapter chapter-${state}`}>
@@ -191,7 +178,7 @@ export default function LiveSession() {
                 </p>
               )}
             </>
-          ) : snap.status === 'scoring' || snap.status === 'saving' ? (
+          ) : snap.status === 'scoring' ? (
             <p className="muted">
               <span className="pulse" aria-hidden /> The TCN movement pattern model is reviewing the whole session…
             </p>
@@ -220,16 +207,14 @@ export default function LiveSession() {
           />
         </div>
         <div className="live-grid">
-          <StickFields samples={samples} inGame={lobby} />
+          <StickFields samples={samples} />
           {chart === 'distance' ? (
             <RollingChart
               title="Distance from target"
               caption={
-                !lobby
-                  ? 'How far each stick is from where the game wants it. Lower is closer.'
-                  : snap.level === 'rat'
-                    ? 'Rat Catching is about timing, so it has no target to follow. See Stick tilt for the flicks.'
-                    : 'How far the in-game hand or lure is from its target, as a share of the play area. Lower is closer.'
+                snap.level === 'rat'
+                  ? 'Rat Catching is about timing, so it has no target to follow. See Stick tilt for the flicks.'
+                  : 'How far the in-game hand or lure is from its target, as a share of the play area. Lower is closer.'
               }
               samples={samples}
               windowS={20}
@@ -255,7 +240,7 @@ export default function LiveSession() {
           )}
         </div>
         {samples.length === 0 && (
-          <p className="muted">Movement appears here once a chapter starts. Story screens and breaks are not recorded.</p>
+          <p className="muted">Movement appears here once the resident starts moving.</p>
         )}
       </section>
 
@@ -286,7 +271,7 @@ export default function LiveSession() {
                   <Tile key={x.label} label={x.label} left={x.vals[0]} right={x.vals[1]} hint={x.hint} />
                 ))}
               </div>
-              <ReachTrialsChart trials={reachTrials} lobby={lobby} level={snap.level} />
+              <ReachTrialsChart trials={reachTrials} level={snap.level} />
             </>
           )}
           {mTab === 'steady' && (

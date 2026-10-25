@@ -296,27 +296,7 @@ kbd {
   font-weight: 700;
 }
 
-.garden-analytics { margin-top: 20px; }
-.analytics-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.garden-analytics select {
-  width: 100%; min-height: 48px; padding: 8px 12px;
-  border: 1px solid var(--line); border-radius: 8px;
-  background: var(--surface); color: var(--ink);
-}
 .btn-secondary { background: transparent; color: var(--accent); }
-.garden-chart {
-  display: block; width: 100%; height: auto;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-}
-.garden-analytics .chart-axis { stroke: var(--line); stroke-width: 2; }
-.garden-analytics .chart-left, .garden-analytics .chart-right {
-  fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-}
-.garden-analytics .chart-left { stroke: var(--hand-left); }
-.garden-analytics .chart-right { stroke: var(--hand-right); }
-.garden-analytics .chart-key { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
-.garden-analytics .chart-key-left { background: var(--hand-left); }
-.garden-analytics .chart-key-right { background: var(--hand-right); }
 /* Checkbox */
 .check {
   display: flex;
@@ -689,21 +669,6 @@ td.num {
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-/* Resident: garden launcher */
-.garden-launch { display: grid; grid-template-columns: 1fr; gap: 24px; align-items: center; background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 16px; }
-@media (min-width: 820px) { .garden-launch { grid-template-columns: 360px 1fr; padding: 28px; } }
-.garden-art svg { width: 100%; height: auto; display: block; border-radius: 16px; }
-.ga-sky { fill: #cfe6f5; } .ga-sun { fill: #f7d36b; } .ga-hill { fill: #9fcf86; } .ga-grass { fill: #7fbf62; }
-.ga-trunk { fill: #8a5d3b; } .ga-tree { fill: #5f9e4a; } .ga-apple { fill: #d8443b; } .ga-flower { fill: #f3f0ff; stroke: #b9a6ea; stroke-width: 2; }
-.ga-bird-l { fill: var(--hand-left); } .ga-bird-r { fill: var(--hand-right); }
-.garden-copy { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
-.garden-copy h2 { margin: 0; font-size: 1.7rem; }
-.garden-status { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 12px;
-  background: var(--accent-soft); font-size: 1.1rem; }
-.garden-status p { margin: 4px 0 0; }
-.garden-status-done { background: color-mix(in srgb, var(--ok) 12%, var(--surface)); }
-.alt-game { margin: 4px 0 0; }
 .pulse { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--bad);
   margin-top: 0.45em; box-shadow: 0 0 0 0 color-mix(in srgb, var(--bad) 60%, transparent); animation: pulse 1.6s infinite; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 9px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -727,8 +692,7 @@ td.num {
 .live-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 700; padding: 4px 12px;
   border-radius: 999px; border: 1px solid var(--line); vertical-align: middle; color: var(--muted); }
 .live-pill .pulse { margin-top: 0; width: 8px; height: 8px; }
-.live-playing, .live-ready, .live-waiting, .live-starting { color: var(--bad); border-color: currentColor; }
-.live-paused { color: var(--warn); border-color: currentColor; }
+.live-playing, .live-ready { color: var(--bad); border-color: currentColor; }
 .live-finished { color: var(--ok); border-color: currentColor; }
 .live-failed { color: var(--bad); }
 .chapter-track { list-style: none; padding: 0; margin: 0 0 20px; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -781,7 +745,6 @@ td.num {
 .pattern-val { font-weight: 700; text-align: right; }
 .pattern-levels summary { cursor: pointer; font-weight: 700; color: var(--accent); }
 .pattern-levels table { margin-top: 8px; }
-.garden-status .pulse { background: var(--ok); box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); }
 
 /* ===== Calmer, roomier caregiver UI ===== */
 .page-title { margin: 8px 0 20px; }

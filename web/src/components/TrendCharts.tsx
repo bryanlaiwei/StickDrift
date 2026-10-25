@@ -1,7 +1,6 @@
 import { useId, useState } from 'react'
-import type { Concern, Finding, GameSession, GardenSession, HandLive, Insights, MeasureKey, SessionSummary } from '../api'
+import type { Concern, Finding, GameSession, HandLive, Insights, MeasureKey, SessionSummary } from '../api'
 import { formatDate, visitLabels } from '../format'
-import { PATTERN_LABELS, PATTERN_ORDER } from './liveData'
 import { Tabs } from './Tabs'
 
 interface Series {
@@ -361,83 +360,6 @@ export function TrendCharts({ sessions, insights }: { sessions: SessionSummary[]
           },
         ]}
       />
-    </div>
-  )
-}
-
-
-type GardenKey = 'patterns' | 'reach' | 'tracking'
-const GARDEN_TABS: { key: GardenKey; label: string }[] = [
-  { key: 'patterns', label: 'Pattern scores' },
-  { key: 'reach', label: 'Time to reach' },
-  { key: 'tracking', label: 'Distance from target' },
-]
-
-/** Trend charts across garden visits (oldest to newest). Scores come from the TCN model, the rest from live metrics. */
-export function GardenTrendCharts({ visits }: { visits: GardenSession[] }) {
-  const [view, setView] = useState<GardenKey>('patterns')
-  const ordered = visits.slice().reverse()
-  const scored = ordered.filter((v) => v.tcn?.scores)
-  const live = ordered.filter((v) => v.live)
-
-  const empty = (what: string) => (
-    <p className="muted">
-      {what} appears after the first visit with this data.
-    </p>
-  )
-
-  return (
-    <div className="chart-single">
-      <Tabs variant="pills" label="Garden chart" value={view} onChange={setView} items={GARDEN_TABS} />
-      {view === 'patterns' &&
-        (scored.length < 1 ? (
-          empty('The pattern-score chart')
-        ) : (
-          <LineChart
-            title="Pattern scores"
-            caption="How much each visit resembled each movement pattern, 0 to 100 (model judgement at the end of the session). 50 is “keep an eye on”, 70 is “check soon”."
-            xLabels={visitLabels(scored.map((v) => v.started_at))}
-            yMin={0}
-            yMax={100}
-            format={(v) => `${Math.round(v)}`}
-            series={PATTERN_ORDER.map((k, i) => ({
-              label: PATTERN_LABELS[k],
-              color: `var(--pat-${i + 1})`,
-              points: scored.map((v) => v.tcn!.scores[k] ?? null),
-            }))}
-          />
-        ))}
-      {view === 'reach' &&
-        (live.length < 1 ? (
-          empty('The reach-time chart')
-        ) : (
-          <LineChart
-            title="Time to reach an apple"
-            caption="Median time each hand took to reach its apple, per visit. Lower is quicker."
-            xLabels={visitLabels(live.map((v) => v.started_at))}
-            format={(v) => `${v.toFixed(2)} s`}
-            series={[
-              { label: 'Left hand', color: 'var(--hand-left)', points: live.map((v) => v.live!.hands.left.reach_s) },
-              { label: 'Right hand', color: 'var(--hand-right)', points: live.map((v) => v.live!.hands.right.reach_s) },
-            ]}
-          />
-        ))}
-      {view === 'tracking' &&
-        (live.length < 1 ? (
-          empty('The tracking chart')
-        ) : (
-          <LineChart
-            title="Distance from target"
-            caption="Average distance from the moving target during the butterfly and watering chapters, as a share of the full stick range. Lower is closer."
-            xLabels={visitLabels(live.map((v) => v.started_at))}
-            yMin={0}
-            format={(v) => `${Math.round(v * 100)}%`}
-            series={[
-              { label: 'Left hand', color: 'var(--hand-left)', points: live.map((v) => v.live!.hands.left.tracking_error) },
-              { label: 'Right hand', color: 'var(--hand-right)', points: live.map((v) => v.live!.hands.right.tracking_error) },
-            ]}
-          />
-        ))}
     </div>
   )
 }

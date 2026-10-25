@@ -2,7 +2,7 @@
 
 Residents do not get a history view; only caregivers see results. Insights compare
 the latest game visits with the resident's own earlier visits (`insights.resident_insights`)
-and add the pattern model's judgement of their latest judged garden session and game visit.
+and add the pattern model's judgement of their latest scored game visits.
 """
 from typing import Any, List, Optional
 from uuid import UUID
@@ -64,17 +64,6 @@ class ResidentRow(BaseModel):
     trend_right_ms: List[Optional[float]]
 
 
-class GardenSession(BaseModel):
-    session_id: UUID
-    started_at: Any
-    status: str
-    is_synthetic: bool
-    levels_completed: Optional[int]
-    levels_total: int = 4
-    tcn: Optional[dict]
-    live: Optional[dict]
-
-
 class GameSession(BaseModel):
     """One visit to the web lobby: per-game results keyed apple / fish / rat."""
     session_id: UUID
@@ -98,7 +87,6 @@ class ResidentDetail(BaseModel):
     review: Review
     insights: dict
     sessions: List[SessionSummary]
-    garden_sessions: List[GardenSession]
     game_sessions: List[GameSession]
 
 
@@ -114,20 +102,6 @@ def _fetch_sessions(conn, participant_id: UUID) -> List[dict]:
            WHERE s.participant_id = %s AND s.protocol_version NOT LIKE 'garden-%%'
              AND s.protocol_version NOT LIKE 'lobby-%%'
            ORDER BY s.started_at DESC""",
-        (participant_id,),
-    ).fetchall()
-
-
-def _fetch_garden(conn, participant_id: UUID) -> List[dict]:
-    return conn.execute(
-        """SELECT s.session_id, s.started_at, s.status, s.is_synthetic,
-                  (ss.metrics->>'levels_completed')::int AS levels_completed,
-                  CASE WHEN s.protocol_version = 'lobby-v1' THEN 3 ELSE 4 END AS levels_total,
-                  ss.metrics->'tcn' AS tcn, ss.metrics->'live' AS live
-           FROM sessions s
-           LEFT JOIN session_summaries ss ON ss.session_id = s.session_id
-           WHERE s.participant_id = %s AND s.protocol_version LIKE 'garden-%%'
-           ORDER BY s.started_at DESC LIMIT 50""",
         (participant_id,),
     ).fetchall()
 
@@ -166,16 +140,14 @@ def resident_profile(conn, participant_id: UUID) -> Optional[dict]:
     if p is None:
         return None
     sessions = _fetch_sessions(conn, participant_id)
-    garden = _fetch_garden(conn, participant_id)
     games = _fetch_games(conn, participant_id)
-    insights = add_model_concerns(resident_insights(sessions, games), garden)
-    insights = add_model_concerns(insights, games, kind="lobby")
+    insights = add_model_concerns(resident_insights(sessions, games), games)
     insights["game_visits"] = len(games)
     return {
         "participant_id": p["participant_id"], "username": p["username"],
         "display_name": p["alias"], "dominant_hand": p["dominant_hand"],
         "review": review_from(insights), "insights": insights, "sessions": sessions,
-        "garden_sessions": garden, "game_sessions": games,
+        "game_sessions": games,
     }
 
 
@@ -202,11 +174,11 @@ def residents(_: dict = Depends(current_caregiver)):
     for p in profiles:
         sessions = p["sessions"]
         done = [s for s in reversed(sessions) if s["status"] == "completed"][-12:]
-        played = [x["started_at"] for x in sessions[:1] + p["garden_sessions"][:1] + p["game_sessions"][:1]]
+        played = [x["started_at"] for x in sessions[:1] + p["game_sessions"][:1]]
         out.append({
             "participant_id": p["participant_id"], "username": p["username"],
             "display_name": p["display_name"], "dominant_hand": p["dominant_hand"],
-            "session_count": len(sessions) + len(p["garden_sessions"]) + len(p["game_sessions"]),
+            "session_count": len(sessions) + len(p["game_sessions"]),
             "last_played_at": max(played) if played else None,
             "review": p["review"], "risk": p["insights"]["risk"],
             "concerns": p["insights"]["concerns"],

@@ -235,7 +235,7 @@ class SharedMeasurementsTest(unittest.TestCase):
         return frames
 
     def test_fish_shake_and_tracking_match_the_live_numbers(self):
-        from backend.app.measurements import SessionMetrics, game_summary
+        from backend.app.measurements import SAMPLE_KEYS, SessionMetrics, game_summary
 
         frames = self.fish_frames()
         report = finish_visit({"fish": {"frames": frames, "events": [
@@ -245,8 +245,7 @@ class SharedMeasurementsTest(unittest.TestCase):
 
         live = SessionMetrics()
         live.start_level("fish")
-        keys = ("t", "trial", "phase", "lx", "ly", "rx", "ry", "target_lx", "target_ly", "target_rx", "target_ry",
-                "on_l", "on_r", "cursor_lx", "cursor_ly", "cursor_rx", "cursor_ry")
+        keys = SAMPLE_KEYS
         for frame in frames:
             live.add([frame[k] for k in keys])
         live_left = game_summary(live.summary(), "fish")["hands"]["left"]
@@ -258,11 +257,10 @@ class SharedMeasurementsTest(unittest.TestCase):
     def test_state_round_trip_keeps_measuring_the_same(self):
         import json
 
-        from backend.app.measurements import SessionMetrics
+        from backend.app.measurements import SAMPLE_KEYS, SessionMetrics
 
         frames = self.fish_frames()
-        keys = ("t", "trial", "phase", "lx", "ly", "rx", "ry", "target_lx", "target_ly", "target_rx", "target_ry",
-                "on_l", "on_r", "cursor_lx", "cursor_ly", "cursor_rx", "cursor_ry")
+        keys = SAMPLE_KEYS
         whole, split = SessionMetrics(), SessionMetrics()
         whole.start_level("fish")
         split.start_level("fish")

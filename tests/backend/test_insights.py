@@ -80,11 +80,11 @@ class ModelConcernTest(unittest.TestCase):
     def concerns(self, *scores):
         visits = [visit(i, scores={"parkinson": s, "stroke": 10, "essential_tremor": 10}) for i, s in enumerate(scores)]
         base = insights.analyze_lobby(visits)
-        return insights.add_model_concerns(base, visits, kind="lobby")["concerns"]
+        return insights.add_model_concerns(base, visits)["concerns"]
 
     def test_one_high_visit_is_only_watch(self):
         found = self.concerns(85, 20)
-        self.assertEqual([(c["id"], c["level"]) for c in found], [("model_lobby_parkinson", "watch")])
+        self.assertEqual([(c["id"], c["level"]) for c in found], [("model_parkinson", "watch")])
 
     def test_two_high_visits_in_a_row_is_check(self):
         found = self.concerns(85, 75)
@@ -105,9 +105,9 @@ class ModelConcernTest(unittest.TestCase):
 @unittest.skipUnless(assistant, "needs the backend packages (backend/requirements.txt)")
 class AssistantTest(unittest.TestCase):
     def profile(self, visits):
-        ins = insights.add_model_concerns(insights.resident_insights([], visits), visits, kind="lobby")
+        ins = insights.add_model_concerns(insights.resident_insights([], visits), visits)
         return {"display_name": "Ada", "dominant_hand": "right", "insights": ins, "sessions": [],
-                "garden_sessions": [], "game_sessions": visits, "review": insights.review_from(ins)}
+                "game_sessions": visits, "review": insights.review_from(ins)}
 
     def test_every_condition_name_is_refused(self):
         for text in ("resembles Parkinson's", "a stroke pattern", "essential tremor", "possible PD"):

@@ -36,17 +36,8 @@ def new_password() -> str:
 def main(reset_caregiver: bool = False):
     with pool.connection() as conn:
         # Seniors: backfill a username + password for any resident missing one.
-        garden_imports_exist = conn.execute(
-            "SELECT to_regclass('garden_imports') AS relation"
-        ).fetchone()["relation"] is not None
-        exclude_imports = (
-            """WHERE NOT EXISTS (
-                SELECT 1 FROM sessions s JOIN garden_imports i ON i.session_id = s.session_id
-                WHERE s.participant_id = p.participant_id
-            )""" if garden_imports_exist else ""
-        )
         rows = conn.execute(
-            f"SELECT p.participant_id, p.alias, p.username FROM participants p {exclude_imports} ORDER BY p.created_at"
+            "SELECT participant_id, alias, username FROM participants ORDER BY created_at"
         ).fetchall()
         taken = {r["username"].lower() for r in rows if r["username"]}
         for r in rows:

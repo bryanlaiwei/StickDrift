@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { api, type ResidentRow } from '../api'
 import { Assistant } from '../components/Assistant'
-import { GardenAnalytics } from '../components/GardenAnalytics'
 import { RiskBadge } from '../components/Insights'
 import { LiveNow } from '../components/LiveNow'
 import { formatDateTime } from '../format'
@@ -125,10 +124,6 @@ export default function CaregiverDashboard() {
                 'Which residents are stable?',
               ]}
             />
-          </details>
-          <details className="tool">
-            <summary>Garden recording data</summary>
-            <GardenAnalytics />
           </details>
         </>
       )}

@@ -85,9 +85,7 @@ export interface Insights {
   disclaimer: string
   synthetic: boolean
   usable_sessions: number
-  garden_visits?: number
   game_visits?: number
-  garden_judged?: number
   baseline_sessions: number
   recent_session_ids: string[]
   findings: Finding[]
@@ -144,7 +142,7 @@ export interface HandLive {
 
 export interface ReachTrial {
   trial: number
-  /** web lobby game the attempt came from; garden trials have none */
+  /** the lobby game the attempt came from */
   game?: string
   left?: { reaction_s: number | null; reach_s: number | null; peak_speed: number; reach_size: number | null; reached: boolean }
   right?: { reaction_s: number | null; reach_s: number | null; peak_speed: number; reach_size: number | null; reached: boolean }
@@ -157,17 +155,6 @@ export interface LiveMetrics {
   tracking: Record<string, Record<string, { tracking_error: number; on_target: number; shake: number | null }>>
 }
 
-export interface GardenSession {
-  session_id: string
-  started_at: string
-  status: string
-  is_synthetic: boolean
-  levels_completed: number | null
-  levels_total?: number
-  tcn: TcnResult | null
-  live: LiveMetrics | null
-}
-
 export interface ResidentDetail {
   participant_id: string
   username: string | null
@@ -176,7 +163,6 @@ export interface ResidentDetail {
   review: Review
   insights: Insights
   sessions: SessionSummary[]
-  garden_sessions: GardenSession[]
   game_sessions: GameSession[]
 }
 
@@ -232,19 +218,7 @@ export interface RatReport {
   early_slams?: number
 }
 
-export type LiveStatus =
-  | 'starting'
-  | 'waiting'
-  | 'ready'
-  | 'playing'
-  | 'paused'
-  | 'saving'
-  | 'scoring'
-  | 'finished'
-  | 'failed'
-  | 'stopped'
-  | 'lost'
-  | 'ended'
+export type LiveStatus = 'ready' | 'playing' | 'scoring' | 'finished' | 'failed' | 'lost' | 'ended'
 
 export interface LiveBrief {
   live_id: string
@@ -265,15 +239,24 @@ export interface LiveBrief {
 }
 
 /**
- * [seq, level, t, trial, phase, lx, ly, rx, ry, tlx, tly, trx, try, reached_l, reached_r, clx, cly, crx, cry]
- * The last four are the in-game hand positions sent by web lobby games (null for the garden).
+ * The columns of one live sample: seq and level from the API, then the lobby's sample in the order
+ * web/lobby/measure.js produces it (SAMPLE_KEYS in backend/app/measurements.py).
  */
+export const LIVE_SAMPLE_COLUMNS = [
+  'seq', 'level', 't', 'trial', 'phase',
+  'lx', 'ly', 'rx', 'ry',
+  'target_lx', 'target_ly', 'target_rx', 'target_ry',
+  'on_l', 'on_r',
+  'cursor_lx', 'cursor_ly', 'cursor_rx', 'cursor_ry',
+] as const
+
+/** One live sample, in LIVE_SAMPLE_COLUMNS order. Targets and the in-game hand are null when a game has none. */
 export type LiveSample = [
   number, string, number, number | null, string,
   number, number, number, number,
   number | null, number | null, number | null, number | null,
   number, number,
-  (number | null)?, (number | null)?, (number | null)?, (number | null)?,
+  number | null, number | null, number | null, number | null,
 ]
 
 export interface LiveSnapshot extends LiveBrief {
@@ -282,7 +265,7 @@ export interface LiveSnapshot extends LiveBrief {
   seq: number
   samples: LiveSample[]
   metrics: LiveMetrics
-  /** Garden visits fill scores and levels. Lobby visits also carry the rat-game score. */
+  /** Pattern scores per game and the rat-game score, once the visit is scored. */
   result: (Partial<TcnResult> & { scores?: PatternScores | null; rat?: RatReport | null }) | null
   /** The visit's reconstructed-hands GIF is stored (lobby visits only). */
   hand_replay_ready?: boolean
@@ -310,25 +293,6 @@ export class ApiError extends Error {
     super(message)
     this.status = status
   }
-}
-
-export interface GardenRecording {
-  session_id: string
-  source_group: string | null
-  sample_count: number
-  level_count: number
-  started_at: string
-  status: string
-  is_synthetic: boolean
-}
-
-export interface GardenSecond {
-  bucket: string
-  activity: 'target_reach' | 'target_tracking' | 'bilateral_control' | null
-  sample_count: number
-  left_magnitude: number | null
-  right_magnitude: number | null
-  disconnected_count: number
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -385,16 +349,12 @@ export const api = {
   logout: () => post<void>('/auth/logout'),
 
 
-  gardenRecordings: () => request<GardenRecording[]>('/garden/recordings'),
-  gardenTimeline: (sessionId: string) =>
-    request<GardenSecond[]>(`/sessions/${sessionId}/garden-timeline`),
   caregiverResidents: () => request<ResidentRow[]>('/caregiver/residents'),
-  // an API older than the page leaves out lists added since (game_sessions, garden_sessions), so default them
+  // an API older than the page leaves out lists added since (game_sessions), so default them
   caregiverResident: (id: string) =>
     request<ResidentDetail>(`/caregiver/residents/${id}`).then((d) => ({
       ...d,
       sessions: d.sessions ?? [],
-      garden_sessions: d.garden_sessions ?? [],
       game_sessions: d.game_sessions ?? [],
     })),
   // the PDF prints times in the reader's zone so they match the site

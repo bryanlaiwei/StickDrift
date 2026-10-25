@@ -1,35 +1,37 @@
-import type { LiveSample, PatternKey } from "../api";
+import { LIVE_SAMPLE_COLUMNS, type LiveSample, type PatternKey } from "../api";
 
-// Sample columns: [seq, level, t, trial, phase, lx, ly, rx, ry, tlx, tly, trx, try, reached_l, reached_r]
-export const LX = 5,
-  LY = 6,
-  RX = 7,
-  RY = 8,
-  TLX = 9,
-  TLY = 10,
-  TRX = 11,
-  TRY = 12,
-  CLX = 15;
-export const HZ = 100;
+const col = (name: (typeof LIVE_SAMPLE_COLUMNS)[number]) => LIVE_SAMPLE_COLUMNS.indexOf(name);
+const LX = col("lx"),
+  LY = col("ly"),
+  RX = col("rx"),
+  RY = col("ry"),
+  TLX = col("target_lx"),
+  TLY = col("target_ly"),
+  TRX = col("target_rx"),
+  TRY = col("target_ry"),
+  CLX = col("cursor_lx");
+/** Samples per second the lobby streams (web/lobby/live.js). */
+export const HZ = 60;
 
 export type Hand = "left" | "right";
 export const HANDS: Hand[] = ["left", "right"];
 
 export function handPos(s: LiveSample, hand: Hand): [number, number] {
-  return hand === "left" ? [s[LX], s[LY]] : [s[RX], s[RY]];
+  const [x, y] = hand === "left" ? [s[LX], s[LY]] : [s[RX], s[RY]];
+  return [x as number, y as number];
 }
 
 export function handTarget(s: LiveSample, hand: Hand): [number, number] | null {
-  const x = hand === "left" ? s[TLX] : s[TRX];
-  const y = hand === "left" ? s[TLY] : s[TRY];
+  const x = (hand === "left" ? s[TLX] : s[TRX]) as number | null;
+  const y = (hand === "left" ? s[TLY] : s[TRY]) as number | null;
   return x == null || y == null ? null : [x, y];
 }
 
-/** Where the in-game hand is, for web lobby games that move a hand with the stick; null for the garden. */
+/** Where the in-game hand is, for games that move a hand with the stick; null in Rat Catching. */
 export function handCursor(s: LiveSample, hand: Hand): [number, number] | null {
   const i = CLX + (hand === "left" ? 0 : 2);
-  const x = s[i] as number | null | undefined,
-    y = s[i + 1] as number | null | undefined;
+  const x = s[i] as number | null,
+    y = s[i + 1] as number | null;
   return x == null || y == null ? null : [x, y];
 }
 
@@ -61,10 +63,6 @@ export const PATTERN_ORDER: PatternKey[] = [
   "essential_tremor",
 ];
 const LEVEL_NAMES: Record<string, string> = {
-  apples: "Apples",
-  butterfly_left: "Butterfly (left)",
-  butterfly_right: "Butterfly (right)",
-  water: "Watering",
   lobby: "Lobby",
   apple: "Apple Picking",
   fish: "Harbour Fishing",

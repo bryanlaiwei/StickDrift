@@ -53,7 +53,7 @@ Visits are stored only in Tiger Data. The API writes no recording files; the pat
 - **Live view** (`/caregiver/live/:id`). Each in-game hand against its target, a rolling 20-second chart (distance from target or stick tilt), and measurements updating as the resident plays.
 - **Resident page** (`/caregiver/residents/:id`):
   - **Overview.** Status banner and any potential concerns. Each concern shows what changed, what to check first, possible everyday reasons, and its research basis.
-  - **Trends.** One line per hand across visits: time to pick an apple, time on the fishing lane, time to slam a rat (and garden or earlier sessions when the resident has them).
+  - **Trends.** One line per hand across visits: time to pick an apple, time on the fishing lane, time to slam a rat (and earlier sessions when the resident has them).
   - **Game visits.** The latest visit as one card per game, the pattern chart for that visit, and a table of every visit. Visits recorded since hand replays were added also have a short **reconstructed hands** GIF (the 3D hands and controller during the busiest few seconds, shake drawn ×10); it is also shown at the end of the live view.
   - **Ask the assistant.** Questions about this resident, answered from their recorded measurements.
   - **Clinician report (PDF).** A one-click summary of visits, per-hand results, pattern scores and concerns for a nurse or doctor (`backend/app/clinician_report.py`). Gemini writes the short narrative under the same checks as the assistant, with a template fallback.
@@ -142,18 +142,7 @@ For the cross-laptop setup, each laptop runs its own API and web app against the
 | `GEMINI_API_KEY` | Enables the AI assistant and the PDF narrative; without it the rule-based and template text are used |
 | `GEMINI_MODEL` | Optional model override (default `gemini-3.8-flash`, with fallbacks) |
 | `CORS_ORIGINS` | Allowed web origins, comma separated (default `http://localhost:5173`) |
-| `GARDEN_RECORDING_TIMEZONE` | Timezone of old garden CSV timestamps, for `scripts.import_garden` (default `America/Toronto`) |
 | `STICKDRIFT_GAME_PYTHON` | Where the API finds the root uv environment's Python (visit report and hand replays; default `../.venv/bin/python`, on Windows set it to `.venv\Scripts\python.exe`) |
-
-### 🌻 Old garden recordings
-
-Before the browser lobby, residents played a pygame garden game (`garden-v3`, since removed). Visits already imported from it still appear on resident pages as **Garden visits**. Recording folders that were never imported can still be loaded:
-
-```bash
-cd backend
-python -m scripts.import_garden ../data --dry-run
-python -m scripts.import_garden ../data
-```
 
 ### 🏋️ Training the pattern model
 
@@ -185,9 +174,8 @@ Data lives in Tiger Data (managed PostgreSQL with TimescaleDB), so it leaves the
 | Table | What it holds |
 | --- | --- |
 | `participants`, `caregivers`, `auth_sessions` | Accounts and logins |
-| `sessions`, `session_summaries` | One row per visit (`lobby-v1` or `garden-v3`) and its per-game, per-hand results |
+| `sessions`, `session_summaries` | One row per visit (`lobby-v1`) and its per-game, per-hand results |
 | `raw_samples` | Hypertable of in-game stick samples with target and in-game hand positions, tagged by game; the training data |
-| `garden_level_results`, `garden_imports` | Imported garden recordings |
 | `live_sessions`, `live_samples`, `live_events` | Live sessions (state, token hash, samples, in-game events), cleared after a day; finished visits are copied to `sessions` and `raw_samples` first |
 | `session_hand_replays` | One reconstructed-hands GIF (under ~1.5 MB) per lobby visit, plus which game and window it shows; the API creates this table on first use |
 
@@ -197,7 +185,7 @@ From the fourth game visit with the controller, a resident's latest visits are c
 
 ```
 backend/                     FastAPI API (its own venv, backend/requirements.txt)
-  app/main.py                App setup, health, imported garden data
+  app/main.py                App setup and health check
   app/auth.py                Resident and caregiver accounts, login sessions, access code
   app/live.py                Live lobby sessions: ingest, saving visits, end-of-visit scoring
   app/live_stream.py         LISTEN/NOTIFY hub and the caregiver WebSocket
@@ -209,7 +197,7 @@ backend/                     FastAPI API (its own venv, backend/requirements.txt
   app/gemini.py              The Gemini client shared by the assistant and the report
   app/hand_replays.py        Stores and serves each visit's reconstructed-hands GIF
   sql/                       Tiger Data schema (schema.sql, auth_schema.sql)
-  scripts/                   Demo data, demo logins, old garden import
+  scripts/                   Demo data and demo logins
 web/                         Website (React + Vite) and the browser lobby games
   src/                       Login, resident home, caregiver dashboard, live view, resident pages
   lobby.html, lobby/         3D lobby and games (three.js); live.js streams, measure.js measures
@@ -253,7 +241,7 @@ All caregiver routes need a caregiver login; `/me/*` routes need a resident logi
 | GET | `/caregiver/residents/{id}/report.pdf` | Clinician PDF report (`?tz=` prints times in the reader's zone) |
 | GET | `/health` | Database reachable |
 
-`main.py` also serves `/garden/recordings` and `/sessions/{id}/garden-timeline` (caregivers only) for imported garden data. Live sessions are kept in Tiger Data, so the API can run with more than one worker and a restart doesn't drop a visit in progress.
+Live sessions are kept in Tiger Data, so the API can run with more than one worker and a restart doesn't drop a visit in progress.
 
 ## ⚠️ Limitations
 

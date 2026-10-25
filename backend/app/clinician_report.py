@@ -146,8 +146,7 @@ def _template_draft(p: dict) -> dict:
     ins = p["insights"]
     if ins["status"] != "ok":
         games = [g for g in p.get("game_sessions", []) if g["games"]]
-        garden = p.get("garden_sessions", [])
-        if not games and not garden:
+        if not games:
             return {"summary": ins["summary"],
                     "data_description": f"{_n(ins['usable_sessions'], 'usable ' + baseline_unit(ins))} on record.",
                     "observations": [], "irregularities": [],
@@ -156,11 +155,10 @@ def _template_draft(p: dict) -> dict:
         latest = next((g for g in games if not g["is_synthetic"]), games[0]) if games else None
         observations = [{"measure": f"{name} ({_fmt_when(latest['started_at'])})", "statement": text.capitalize() + "."}
                         for name, text in game_parts(latest)] if latest else []
-        return {"summary": f"{len(games)} game visits and {len(garden)} garden visits are recorded. "
-                           f"{ins['summary']}",
+        return {"summary": f"{_n(len(games), 'game visit')} recorded. {ins['summary']}",
                 "data_description": "Measurements come from the web lobby games (Apple Picking, Harbour Fishing, "
-                                    "Rat Catching) and the garden game. Until enough visits with the controller "
-                                    "are recorded, each visit is shown on its own.",
+                                    "Rat Catching). Until enough visits with the controller are recorded, each visit "
+                                    "is shown on its own.",
                 "observations": observations, "irregularities": [],
                 "limitations": ["A personal baseline needs at least 4 game visits with the controller, so changes "
                                 "are not flagged yet."],
@@ -248,7 +246,7 @@ def _localize(p: dict, tz: tzinfo) -> dict:
     def conv(rows):
         return [{**r, "started_at": r["started_at"].astimezone(tz)} if hasattr(r["started_at"], "astimezone") else r
                 for r in rows]
-    return {**p, "sessions": conv(p["sessions"]), "garden_sessions": conv(p.get("garden_sessions", [])),
+    return {**p, "sessions": conv(p["sessions"]),
             "game_sessions": conv(p.get("game_sessions", []))}
 
 
@@ -367,7 +365,6 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
     ins = p["insights"]
     done = [s for s in reversed(p["sessions"]) if s["status"] == "completed"]
     games = [g for g in p.get("game_sessions", []) if g["games"]]  # newest first
-    garden = p.get("garden_sessions", [])
     keyboard = sum(1 for g in games if g["is_synthetic"])
     now = datetime.now(tz)
     buf = BytesIO()
@@ -378,15 +375,14 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
     el = [P("Movement Activity Data Summary", H1),
           P("Prepared for clinician review. Descriptive only; no diagnosis is made.", SMALL), Spacer(1, 6)]
 
-    starts = [x["started_at"] for x in done + games + garden]
+    starts = [x["started_at"] for x in done + games]
     period = f"{_fmt_date(min(starts))} to {_fmt_date(max(starts))}" if starts else "no recorded activity yet"
     activity = [_n(len(games), "game visit")] if games else []
-    activity += [_n(len(garden), "garden visit")] if garden else []
     if p["sessions"]:
         activity.append(_n(len(done), "reaction-test session"))
     if ins["status"] == "ok":
         activity.append(f"baseline from {_n(ins['usable_sessions'], baseline_unit(ins))}")
-    if ins["synthetic"] or any(g["is_synthetic"] for g in garden):
+    if ins["synthetic"]:
         synth = "Yes. Some or all data are simulated and not from a real person."
     elif keyboard:
         synth = f"No. {keyboard} of {_n(len(games), 'game visit')} used keyboard input, not the controller."
@@ -457,16 +453,8 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
                            else hand(r, game, side)[key] * scale)
         if any(pts for _, pts, _ in series):
             charts.append(_chart(title, series, None, yfmt, "Visit with this game (oldest to newest)"))
-    seen = [g for g in reversed(garden) if g.get("live") and not g["is_synthetic"]]
-    live = lambda r, side: ((r["live"].get("hands") or {}).get(side) or {})
-    for title, key, scale, yfmt in (("Garden: time to reach an apple (s)", "reach_s", 1, "%.2f"),
-                                    ("Garden: distance from target (%)", "tracking_error", 100, "%.0f")):
-        series = _per_hand(seen, lambda r, side: None if live(r, side).get(key) is None else live(r, side)[key] * scale)
-        if any(pts for _, pts, _ in series):
-            charts.append(_chart(title, series, None, yfmt, "Garden visit (oldest to newest)"))
-    if games or garden:
-        notes.append("Game and garden charts: each point is one visit. Free-play games have no usual level, so "
-                     "nothing is marked as changed." + (" Keyboard visits are left out." if keyboard else ""))
+    if games:
+        notes.append("Game charts: each point is one visit." + (" Keyboard visits are left out." if keyboard else ""))
 
     el.append(P("5. Trends across visits", H2))
     if charts:
@@ -478,7 +466,7 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
         el.append(P("No measurements to chart yet."))
 
     el.append(P("6. Recorded activity (most recent first)", H2))
-    if not (games or garden or p["sessions"]):
+    if not (games or p["sessions"]):
         el.append(P("Nothing has been recorded for this resident yet."))
     if games:
         rows = [[P(h, CELLB) for h in ("Date", "Games", "Apple Picking", "Harbour Fishing", "Rat Catching", "Input")]]
@@ -490,18 +478,6 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
         shown = f", latest {min(len(games), 12)} shown" if len(games) > 12 else ""
         el += [P(f"Game visits ({len(games)}{shown})", TITLE),
                _tbl(rows, [1.15 * inch, 0.55 * inch] + [(W - 2.45 * inch) / 3] * 3 + [0.75 * inch]), Spacer(1, 6)]
-    if garden:
-        secs = lambda v: "-" if v is None else f"{v:.2f} s"
-        rows = [[P(h, CELLB) for h in ("Date", "Chapters", "Reach (left)", "Reach (right)", "Status")]]
-        for g in garden[:10]:
-            hands = (g.get("live") or {}).get("hands") or {}
-            rows.append([P(_fmt_when(g["started_at"]) + (" (sim.)" if g["is_synthetic"] else ""), CELL),
-                         P(f"{g.get('levels_completed') or 0}/{g.get('levels_total') or 4}", CELL),
-                         P(secs((hands.get("left") or {}).get("reach_s")), CELL),
-                         P(secs((hands.get("right") or {}).get("reach_s")), CELL),
-                         P("Finished" if g["status"] == "completed" else "Stopped early", CELL)])
-        el += [P(f"Garden visits ({len(garden)}{', latest 10 shown' if len(garden) > 10 else ''})", TITLE), _tbl(rows, [1.35 * inch] + [(W - 1.35 * inch) / 4] * 4),
-               Spacer(1, 6)]
     if p["sessions"]:
         rows = [[P(h, CELLB) for h in ("Date", "Status/quality", "Left RT", "Right RT", "Left acc.", "Right acc.", "Both acc.")]]
         for s in p["sessions"][:10]:

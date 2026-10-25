@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 from . import hand_replays
 from .auth import current_caregiver, current_senior
 from .db import pool
-from .measurements import SessionMetrics, game_summary
+from .measurements import MOTION_KEYS, SAMPLE_KEYS, SessionMetrics, game_summary
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["live"])
@@ -44,7 +44,7 @@ HOST = socket.gethostname()
 CHANNEL = "stickdrift_live"  # NOTIFY channel; caregiver APIs LISTEN on it (see live_stream.py)
 NOTIFY_MAX = 7000            # Postgres caps a payload at 8000 bytes; bigger batches send only a pointer
 
-ACTIVE = {"starting", "waiting", "ready", "playing", "paused", "saving", "scoring"}
+ACTIVE = {"ready", "playing", "scoring"}
 OPEN = sorted(ACTIVE - {"scoring"})  # statuses that still accept samples
 STATE_EVERY_S = 0.5      # how often the caregiver-facing measurements are rewritten and announced
 STALE_S = 20             # an active row older than this lost its game or tab
@@ -52,15 +52,18 @@ RECENT_H = 6             # finished sessions listed under "Just finished"
 LOBBY_GAMES = ("apple", "fish", "rat")
 KEEP_EVENTS = {"trial", "wrong", "basket", "expired", "result", "trace", "slam", "miss", "card_rat"}
 MAX_FRAMES = 24000       # a visit is a few minutes at 60 Hz; the report stops reading there
-MOTION_KEYS = ("gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z")
+# live_samples column for each SAMPLE_KEYS entry; the table keeps its older short names.
+LIVE_COLUMNS = tuple({"target_lx": "tgt_lx", "target_ly": "tgt_ly", "target_rx": "tgt_rx", "target_ry": "tgt_ry",
+                      "on_l": "reached_l", "on_r": "reached_r", "cursor_lx": "cur_lx", "cursor_ly": "cur_ly",
+                      "cursor_rx": "cur_rx", "cursor_ry": "cur_ry"}.get(k, k) for k in SAMPLE_KEYS)
+# What watchers get for each sample (samples_since and the NOTIFY payload): seq, level, then the sample.
+WATCH_COLUMNS = ("seq", "level", *LIVE_COLUMNS)
 
 # Applied at startup (and kept in backend/sql/schema.sql), so a database set up before
 # sessions moved out of the API's memory needs no manual step.
 SCHEMA_SQL = """
-ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'garden';
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS token_hash TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS keyboard BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS folder TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS running JSONB;
 CREATE UNIQUE INDEX IF NOT EXISTS live_sessions_token_idx ON live_sessions (token_hash);
 ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS gyro_x REAL;
@@ -110,14 +113,13 @@ class LiveSession:
         self.lock = threading.Lock()
         self.created_at = _now()
         self.ended_at: Optional[datetime] = None
-        self.status = "starting"
+        self.status = "ready"
         self.level: Optional[str] = None
-        self.levels: List[str] = []
+        self.levels: List[str] = ["lobby", *LOBBY_GAMES]
         self.levels_done: List[str] = []
         self.trial: Optional[int] = None
         self.phase: Optional[str] = None
         self.synthetic = keyboard
-        self.folder: Optional[str] = None
         self.seq = 0
         self.metrics = SessionMetrics()
         self.result: Optional[dict] = None
@@ -131,7 +133,7 @@ class LiveSession:
         s.created_at, s.ended_at = row["started_at"], row["ended_at"]
         s.status, s.level = row["status"], row["level"]
         s.levels, s.levels_done = list(row["levels"] or []), list(row["levels_done"] or [])
-        s.trial, s.phase, s.synthetic, s.folder = row["trial"], row["phase"], row["synthetic"], row["folder"]
+        s.trial, s.phase, s.synthetic = row["trial"], row["phase"], row["synthetic"]
         s.seq = row["seq"]
         s.metrics = SessionMetrics.from_state(row["running"])
         s.result, s.db_session_id, s.error = row["result"], row["db_session_id"], row["error"]
@@ -148,54 +150,38 @@ class LiveSession:
                     if item.get("type") in KEEP_EVENTS and self.level in LOBBY_GAMES:
                         events.append((self.id, self.level, Jsonb(item)))
                     changed |= self._event(item)
-                elif isinstance(item, list) and len(item) in (13, 17, 23) and self.level:
-                    # garden: 13 values; web lobby: 17, plus 6 gyro/acc values when the pad reports them
+                elif isinstance(item, list) and len(item) in (17, 23) and self.level:
+                    # SAMPLE_KEYS, plus MOTION_KEYS when the pad reports them
                     core = item[:17]
-                    motion = [_num(v) for v in item[17:23]] if len(item) == 23 else []
+                    motion = [_num(v) for v in item[17:23]] if len(item) == 23 else [None] * 6
                     self.seq += 1
                     self.metrics.add(core)
                     self.trial, self.phase = core[1], core[2]
-                    rows.append((self.id, self.seq, self.level, *core, *[None] * (17 - len(core)),
-                                 *motion, *[None] * (6 - len(motion))))
+                    rows.append((self.id, self.seq, self.level, *core, *motion))
         return rows, events, changed
 
     def _event(self, e: dict) -> bool:
         kind = e.get("type")
         if kind == "session_start":
-            self.folder = e.get("folder")
             self.synthetic = bool(e.get("synthetic")) or self.keyboard
             self.levels = [str(x) for x in e.get("levels", [])][:8]
-            self.status = "waiting"
-        elif kind == "calibrated":
-            self.status = "ready"
         elif kind == "level_start":
             self.level = str(e.get("level"))
             self.metrics.start_level(self.level)
             self.status = "playing"
-        elif kind == "paused":
-            self.status = "paused"
-        elif kind == "resumed":
-            self.status = "playing"
-        elif kind == "result" and "lobby" in self.levels and self.level in LOBBY_GAMES:
-            # A lobby game only sends its result when it was played through; leaving early sends none.
+        elif kind == "result" and self.level in LOBBY_GAMES:
+            # A game only sends its result when it was played through; leaving early sends none.
             if self.level not in self.levels_done:
                 self.levels_done.append(self.level)
             self.needs_save = True
         elif kind == "level_end":
-            self.metrics.close_trial()
-            if "lobby" in self.levels:
-                self.needs_save = self.needs_save or self.level in LOBBY_GAMES  # also when left early
-            elif e.get("level") and e.get("completed"):
-                self.levels_done.append(str(e["level"]))
+            self.needs_save = self.needs_save or self.level in LOBBY_GAMES  # also when left early
             self.status, self.level, self.trial, self.phase = "ready", None, None, None
         elif kind == "input":  # the lobby saw a controller after starting as "keyboard"
             if e.get("source") == "gamepad":
                 self.synthetic = self.keyboard = False
         elif kind == "trial" and self.level:
             self.metrics.add_trial(e)
-        elif kind == "session_end":
-            self.folder = e.get("folder") or self.folder
-            self.status = "saving"
         else:
             return False
         return True
@@ -204,19 +190,19 @@ class LiveSession:
 # ---- TigerData persistence ----------------------------------------------------
 
 SESSION_COLUMNS = """live_id, participant_id, name, status, level, levels, levels_done, trial, phase, synthetic,
-                     keyboard, folder, seq, running, result, db_session_id, error, started_at, ended_at"""
+                     keyboard, seq, running, result, db_session_id, error, started_at, ended_at"""
 
 
-def _create(s: LiveSession, kind: str) -> str:
+def _create(s: LiveSession) -> str:
     """Store a new session and return its token. Only the token's hash is kept."""
     token = secrets.token_urlsafe(32)
     with pool.connection() as conn:
         conn.execute(
             """INSERT INTO live_sessions
-               (live_id, participant_id, name, status, kind, token_hash, keyboard, synthetic, host,
+               (live_id, participant_id, name, status, levels, token_hash, keyboard, synthetic, host,
                 running, started_at, updated_at)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())""",
-            (s.id, s.participant_id, s.name, s.status, kind, _token_hash(token), s.keyboard, s.synthetic, HOST,
+            (s.id, s.participant_id, s.name, s.status, Jsonb(s.levels), _token_hash(token), s.keyboard, s.synthetic, HOST,
              Jsonb(s.metrics.to_state()), s.created_at),
         )
         conn.execute("SELECT pg_notify(%s, %s)", (CHANNEL, json.dumps({"i": str(s.id), "st": 1})))
@@ -228,13 +214,13 @@ def _write(conn, s: LiveSession, announce: bool = True):
     with s.lock:
         metrics = s.metrics.summary() if announce else None
         values = (s.status, s.level, Jsonb(s.levels), Jsonb(s.levels_done), s.trial, s.phase, s.synthetic,
-                  s.keyboard, s.folder, s.seq, Jsonb(s.metrics.to_state()),
+                  s.keyboard, s.seq, Jsonb(s.metrics.to_state()),
                   None if metrics is None else Jsonb(metrics), None if s.result is None else Jsonb(s.result),
                   s.db_session_id, s.error, s.ended_at, announce, s.id)
     conn.execute(
         """UPDATE live_sessions SET
              status = %s, level = %s, levels = %s, levels_done = %s, trial = %s, phase = %s, synthetic = %s,
-             keyboard = %s, folder = %s, seq = %s, running = %s,
+             keyboard = %s, seq = %s, running = %s,
              metrics = COALESCE(%s, metrics),
              result = %s,
              db_session_id = COALESCE(%s, db_session_id),
@@ -265,21 +251,17 @@ def _load(live_id: UUID) -> Optional[LiveSession]:
 def _store_samples(conn, rows: List[tuple]):
     if not rows:
         return
+    columns = ("live_id", *WATCH_COLUMNS, *MOTION_KEYS)
     with conn.cursor() as cur:
         cur.executemany(
-            """INSERT INTO live_samples
-               (live_id, seq, level, t, trial, phase, lx, ly, rx, ry,
-                tgt_lx, tgt_ly, tgt_rx, tgt_ry, reached_l, reached_r, cur_lx, cur_ly, cur_rx, cur_ry,
-                gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                       %s, %s, %s, %s, %s, %s)
-               ON CONFLICT DO NOTHING""",
+            f"""INSERT INTO live_samples ({", ".join(columns)})
+                VALUES ({", ".join(["%s"] * len(columns))}) ON CONFLICT DO NOTHING""",
             rows,
         )
         # Small batches ride in the notification itself, so watchers don't need to read the table.
-        # Watchers get the same 19 values samples_since returns (no motion).
         live_id = str(rows[0][0])
-        payload = json.dumps({"i": live_id, "s": [list(r[1:20]) for r in rows]}, separators=(",", ":"))
+        watched = slice(1, 1 + len(WATCH_COLUMNS))
+        payload = json.dumps({"i": live_id, "s": [list(r[watched]) for r in rows]}, separators=(",", ":"))
         if len(payload) > NOTIFY_MAX:
             payload = json.dumps({"i": live_id, "q": rows[-1][1]})
         cur.execute("SELECT pg_notify(%s, %s)", (CHANNEL, payload))
@@ -291,14 +273,14 @@ def _store_events(conn, rows: List[tuple]):
             cur.executemany("INSERT INTO live_events (live_id, level, event) VALUES (%s, %s, %s)", rows)
 
 
-def _apply(conn, token: str, items: List[Any], kind: Optional[str] = None) -> Optional[LiveSession]:
+def _apply(conn, token: str, items: List[Any]) -> Optional[LiveSession]:
     """Lock the open session behind `token`, apply a batch and write it back. None if no such open session."""
     row = conn.execute(
-        f"""SELECT {SESSION_COLUMNS}, kind, EXTRACT(EPOCH FROM (now() - updated_at)) AS quiet_s
+        f"""SELECT {SESSION_COLUMNS}, EXTRACT(EPOCH FROM (now() - updated_at)) AS quiet_s
             FROM live_sessions WHERE token_hash = %s AND status = ANY(%s) FOR UPDATE""",
         (_token_hash(token), OPEN),
     ).fetchone()
-    if row is None or (kind is not None and row["kind"] != kind):
+    if row is None:
         return None
     s = LiveSession.from_row(row)
     samples, events, changed = s.ingest(items)
@@ -516,17 +498,10 @@ def _finish_visit(s: LiveSession, capture: dict, session_id: Optional[UUID] = No
         if replay is not None:
             replay.deliver(session_id)
 
-_CAPTURE_COLUMNS = (("t", "t"), ("trial", "trial"), ("phase", "phase"),
-                    ("lx", "lx"), ("ly", "ly"), ("rx", "rx"), ("ry", "ry"),
-                    ("target_lx", "tgt_lx"), ("target_ly", "tgt_ly"), ("target_rx", "tgt_rx"), ("target_ry", "tgt_ry"),
-                    ("on_l", "reached_l"), ("on_r", "reached_r"),
-                    ("cursor_lx", "cur_lx"), ("cursor_ly", "cur_ly"), ("cursor_rx", "cur_rx"), ("cursor_ry", "cur_ry"))
-
-
 def _load_capture(live_id: UUID) -> dict:
     """The visit's in-game frames and events, per game, in the shape ml.visit_report reads."""
     capture = {name: {"frames": [], "events": []} for name in LOBBY_GAMES}
-    columns = ", ".join(col for _, col in _CAPTURE_COLUMNS) + ", " + ", ".join(MOTION_KEYS)
+    columns = ", ".join((*LIVE_COLUMNS, *MOTION_KEYS))
     with pool.connection() as conn:
         for name in LOBBY_GAMES:
             rows = conn.execute(
@@ -537,7 +512,7 @@ def _load_capture(live_id: UUID) -> dict:
             if len(rows) > MAX_FRAMES:
                 rows, bucket["truncated"] = rows[:MAX_FRAMES], True
             for r in rows:
-                frame = {key: r[col] for key, col in _CAPTURE_COLUMNS}
+                frame = {key: r[col] for key, col in zip(SAMPLE_KEYS, LIVE_COLUMNS)}
                 if r["gyro_x"] is not None:
                     frame.update({key: r[key] for key in MOTION_KEYS})
                 bucket["frames"].append(frame)
@@ -564,11 +539,11 @@ def _end_lobby(live_id: Optional[UUID] = None, status: str = "ended", token: Opt
     """
     with pool.connection() as conn, conn.transaction():
         if token is not None:
-            s = _apply(conn, token, items or [], kind="lobby")
+            s = _apply(conn, token, items or [])
         else:
             row = conn.execute(
                 f"""SELECT {SESSION_COLUMNS} FROM live_sessions
-                    WHERE live_id = %s AND kind = 'lobby' AND status = ANY(%s) FOR UPDATE SKIP LOCKED""",
+                    WHERE live_id = %s AND levels ? 'lobby' AND status = ANY(%s) FOR UPDATE SKIP LOCKED""",
                 (live_id, OPEN),
             ).fetchone()
             s = None if row is None else LiveSession.from_row(row)
@@ -576,7 +551,6 @@ def _end_lobby(live_id: Optional[UUID] = None, status: str = "ended", token: Opt
             return
         played = _played(conn, s.id)
         with s.lock:
-            s.metrics.close_trial()
             s.level = None
             if played:
                 s.status = "scoring"
@@ -610,9 +584,9 @@ def _score_visit(s: LiveSession, session_id: Optional[UUID]):
 
 
 # ---- saving lobby visits to the resident's history ---------------------------------
-# A visit becomes one `sessions` row (protocol lobby-v1, free play so it never feeds the arrow-style
-# baseline) with per-game results in session_summaries.metrics. Only in-game samples are copied to
-# raw_samples, so walking around the lobby, menus and countdowns never reach training data.
+# A visit becomes one `sessions` row (protocol lobby-v1, mode free_play) with per-game results in
+# session_summaries.metrics. Only in-game samples are copied to raw_samples, so walking around the
+# lobby, menus and countdowns are left out.
 
 LOBBY_PROTOCOL = "lobby-v1"
 
@@ -729,7 +703,7 @@ def save_unsaved_lobbies(min_gap_s: float = 30.0) -> int:
         # Claim a stuck report by touching the row, so only one process re-runs it.
         stuck = [r["live_id"] for r in conn.execute(
             """UPDATE live_sessions SET updated_at = now()
-               WHERE kind = 'lobby' AND status = 'scoring' AND updated_at < now() - make_interval(secs => %s)
+               WHERE levels ? 'lobby' AND status = 'scoring' AND updated_at < now() - make_interval(secs => %s)
                RETURNING live_id""",
             (REPORT_RETRY_S,),
         ).fetchall()]
@@ -751,7 +725,7 @@ def _prune_lobby():
     with pool.connection() as conn:
         ids = [r["live_id"] for r in conn.execute(
             """SELECT live_id FROM live_sessions
-               WHERE kind = 'lobby' AND status = ANY(%s) AND updated_at < now() - make_interval(secs => %s)""",
+               WHERE levels ? 'lobby' AND status = ANY(%s) AND updated_at < now() - make_interval(secs => %s)""",
             (OPEN, LOBBY_IDLE_S),
         ).fetchall()]
     for live_id in ids:
@@ -767,14 +741,13 @@ def lobby_start(body: LobbyStart, me: dict = Depends(current_senior)):
     _prune_lobby()
     with pool.connection() as conn:
         old = [r["live_id"] for r in conn.execute(
-            "SELECT live_id FROM live_sessions WHERE kind = 'lobby' AND participant_id = %s AND status = ANY(%s)",
+            "SELECT live_id FROM live_sessions WHERE levels ? 'lobby' AND participant_id = %s AND status = ANY(%s)",
             (me["account_id"], OPEN),
         ).fetchall()]
     for live_id in old:
         _end_lobby(live_id)  # one open lobby per resident; a reload replaces the old tab
     s = LiveSession(me["account_id"], me["display_name"], body.keyboard)
-    s.status = "ready"
-    token = _create(s, "lobby")
+    token = _create(s)
     _prune_db()
     return {"live_id": s.id, "token": token}
 
@@ -821,8 +794,8 @@ def _brief(row: dict) -> dict:
     error = row["error"]
     if status in ACTIVE and row["stale"]:
         status = "lost"
-        error = error or ("The computer running this game stopped sending updates. Its recording is saved "
-                          "there and can be imported later.")
+        error = error or ("The resident's lobby tab stopped sending updates, so it was probably closed or "
+                          "went offline. The games played so far are saved.")
     return {
         "live_id": row["live_id"], "participant_id": row["participant_id"], "name": row["name"],
         "status": status, "level": row["level"], "levels": row["levels"], "levels_done": row["levels_done"],
@@ -878,10 +851,8 @@ def samples_since(live_id: UUID, since: int, limit: int) -> List[list]:
     """The newest `limit` samples after `since`, oldest first."""
     with pool.connection() as conn:
         rows = conn.execute(
-            """SELECT seq, level, t, trial, phase, lx, ly, rx, ry, tgt_lx, tgt_ly, tgt_rx, tgt_ry,
-                      reached_l, reached_r, cur_lx, cur_ly, cur_rx, cur_ry
-               FROM live_samples WHERE live_id = %s AND seq > %s
-               ORDER BY seq DESC LIMIT %s""",
+            f"""SELECT {", ".join(WATCH_COLUMNS)} FROM live_samples WHERE live_id = %s AND seq > %s
+                ORDER BY seq DESC LIMIT %s""",
             (live_id, max(since, 0), limit),
         ).fetchall()
     return [list(r.values()) for r in reversed(rows)]

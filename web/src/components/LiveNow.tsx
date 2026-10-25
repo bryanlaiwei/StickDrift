@@ -3,25 +3,20 @@ import { Link } from 'react-router'
 import { api, type LiveBrief, type LiveStatus } from '../api'
 import { levelName, PATTERN_LABELS, PATTERN_ORDER } from './liveData'
 
-const ACTIVE: LiveStatus[] = ['starting', 'waiting', 'ready', 'playing', 'paused', 'saving', 'scoring']
+const ACTIVE: LiveStatus[] = ['ready', 'playing', 'scoring']
 
 const SHORT: Record<LiveStatus, string> = {
-  starting: 'Opening the game',
-  waiting: 'Waiting for controller',
-  ready: 'Between chapters',
+  ready: 'In the lobby',
   playing: 'Playing',
-  paused: 'On a break',
-  saving: 'Saving',
   scoring: 'Being judged',
   finished: 'Judged',
   failed: 'Could not judge',
-  stopped: 'Closed early',
   lost: 'Connection lost',
   ended: 'Finished',
 }
 
-/** Garden sessions have 4 chapters; the lobby lists 'lobby' plus its games. */
-const chapterCount = (levels: string[]) => levels.filter((l) => l !== 'lobby').length || 4
+/** The session lists 'lobby' plus its games. */
+const gameCount = (levels: string[]) => levels.filter((l) => l !== 'lobby').length
 
 function topPattern(b: LiveBrief) {
   if (!b.tcn_scores) return null
@@ -32,7 +27,7 @@ function topPattern(b: LiveBrief) {
   return { label: PATTERN_LABELS[key] ?? key, value }
 }
 
-/** Live and recently finished garden sessions. With participantId, only that resident's. */
+/** Live and recently finished lobby sessions. With participantId, only that resident's. */
 export function LiveNow({ participantId, compact }: { participantId?: string; compact?: boolean }) {
   const [items, setItems] = useState<LiveBrief[] | null>(null)
 
@@ -77,7 +72,7 @@ export function LiveNow({ participantId, compact }: { participantId?: string; co
   }
 
   return (
-    <section className="live-now" aria-label="Live garden sessions">
+    <section className="live-now" aria-label="Live sessions">
       {active.map((b) => (
         <Link key={b.live_id} className="live-card" to={`/caregiver/live/${b.live_id}`}>
           <span className="pulse" aria-hidden />
@@ -85,7 +80,7 @@ export function LiveNow({ participantId, compact }: { participantId?: string; co
             <strong>{b.name} is playing</strong>
             <span className="muted">
               {SHORT[b.status]}
-              {b.level ? ` · ${levelName(b.level)}` : ''} · {b.levels_done.length} of {chapterCount(b.levels)} {b.levels.includes('lobby') ? 'games' : 'chapters'}
+              {b.level ? ` · ${levelName(b.level)}` : ''} · {b.levels_done.length} of {gameCount(b.levels)} games
             </span>
           </span>
           <span className="live-card-cta">Watch live →</span>
@@ -99,9 +94,7 @@ export function LiveNow({ participantId, compact }: { participantId?: string; co
               <li key={b.live_id}>
                 <Link to={`/caregiver/live/${b.live_id}`}>
                   <strong>{b.name}</strong> ·{' '}
-                  {b.levels.includes('lobby')
-                    ? `played ${b.levels_done.length} of ${chapterCount(b.levels)} games`
-                    : (SHORT[b.status] ?? b.status ?? '').toLowerCase()}
+                  {`played ${b.levels_done.length} of ${gameCount(b.levels)} games`}
                   {b.rat?.score != null ? ` · Rat Catching ${b.rat.score} pts` : ''}
                   {top && top.value >= 50 ? ` · ${top.label.toLowerCase()} ${Math.round(top.value)}/100` : ''}
                   <span className="live-card-cta"> Open →</span>

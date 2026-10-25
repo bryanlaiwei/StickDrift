@@ -16,7 +16,7 @@ import math
 import sys
 from pathlib import Path
 
-from backend.app.measurements import combine_tracks, hand_summary, shake, track
+from backend.app.measurements import SAMPLE_KEYS, combine_tracks, hand_summary, shake, track
 
 SCHEMA_VERSION = 1
 MEANING = "0-100 pattern resemblance, not a disease probability"
@@ -32,12 +32,6 @@ _CURSOR = {"left": ("cursor_lx", "cursor_ly"), "right": ("cursor_rx", "cursor_ry
 _TARGET = {"left": ("target_lx", "target_ly"), "right": ("target_rx", "target_ry")}
 _STICK = {"left": ("lx", "ly"), "right": ("rx", "ry")}
 _ON = {"left": "on_l", "right": "on_r"}
-_FRAME_KEYS = (
-    "t", "trial", "phase", "lx", "ly", "rx", "ry",
-    "target_lx", "target_ly", "target_rx", "target_ry",
-    "on_l", "on_r",
-    "cursor_lx", "cursor_ly", "cursor_rx", "cursor_ry",
-)
 
 
 def finish_visit(capture, score=None, checkpoint=None):
@@ -341,7 +335,7 @@ def _frames(raw):
         if isinstance(item, dict) and item.get("t") is not None:
             frames.append(item)
         elif isinstance(item, list) and len(item) >= 17:
-            frames.append(dict(zip(_FRAME_KEYS, item[:17])))
+            frames.append(dict(zip(SAMPLE_KEYS, item)))
     frames.sort(key=lambda frame: float(frame["t"]))
     return frames
 

@@ -135,7 +135,7 @@ ALTER TABLE raw_samples
     ADD COLUMN IF NOT EXISTS cursor_ly REAL,
     ADD COLUMN IF NOT EXISTS cursor_rx REAL,
     ADD COLUMN IF NOT EXISTS cursor_ry REAL,
-    ADD COLUMN IF NOT EXISTS game TEXT;  -- web lobby game (apple, fish, rat); NULL for the garden
+    ADD COLUMN IF NOT EXISTS game TEXT;  -- web lobby game (apple, fish, rat)
 
 DO $$ BEGIN
     ALTER TABLE raw_samples ADD CONSTRAINT raw_samples_activity_check
@@ -148,51 +148,6 @@ SELECT create_hypertable('raw_samples', by_range('time'), if_not_exists => TRUE)
 CREATE UNIQUE INDEX IF NOT EXISTS raw_samples_time_session_seq_uidx
     ON raw_samples (time, session_id, seq);
 CREATE INDEX IF NOT EXISTS raw_samples_session_idx ON raw_samples (session_id, time);
-
--- Imported garden recordings keep their source result structure. This avoids
--- inventing assessment outcomes for tracking and watering levels.
-CREATE TABLE IF NOT EXISTS garden_level_results (
-    session_id UUID NOT NULL REFERENCES sessions (session_id) ON DELETE CASCADE,
-    level_number SMALLINT NOT NULL,
-    level_name TEXT NOT NULL,
-    completed BOOLEAN NOT NULL,
-    sample_count INTEGER NOT NULL,
-    duration_s DOUBLE PRECISION NOT NULL,
-    params JSONB NOT NULL,
-    results JSONB NOT NULL,
-    PRIMARY KEY (session_id, level_number)
-);
-
-CREATE TABLE IF NOT EXISTS garden_imports (
-    source_hash TEXT PRIMARY KEY,
-    session_id UUID NOT NULL UNIQUE REFERENCES sessions (session_id) ON DELETE CASCADE,
-    source_group TEXT,
-    sample_count INTEGER NOT NULL,
-    imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS garden_imports_group_idx ON garden_imports (source_group);
-
--- One-second buckets make the ~500 Hz recordings quick to plot. Current
--- unmaterialized rows are included by the real-time aggregate setting.
-CREATE MATERIALIZED VIEW IF NOT EXISTS garden_sample_seconds
-WITH (timescaledb.continuous) AS
-SELECT time_bucket('1 second', time) AS bucket,
-       session_id,
-       activity,
-       count(*) AS sample_count,
-       avg(sqrt(lx * lx + ly * ly)) AS left_magnitude,
-       avg(sqrt(rx * rx + ry * ry)) AS right_magnitude,
-       sum(CASE WHEN connected THEN 0 ELSE 1 END) AS disconnected_count
-FROM raw_samples
-GROUP BY bucket, session_id, activity
-WITH NO DATA;
-ALTER MATERIALIZED VIEW garden_sample_seconds
-    SET (timescaledb.materialized_only = false);
-SELECT add_continuous_aggregate_policy('garden_sample_seconds',
-    start_offset => INTERVAL '7 days',
-    end_offset => INTERVAL '10 seconds',
-    schedule_interval => INTERVAL '1 minute',
-    if_not_exists => TRUE);
 
 -- Low-volume event stream for phase changes, pauses, calibration, and other
 -- auditable game events. High-rate axes remain in raw_samples.
@@ -207,7 +162,7 @@ CREATE TABLE IF NOT EXISTS session_events (
 CREATE INDEX IF NOT EXISTS session_events_session_idx
     ON session_events (session_id, t_ms);
 
--- Live sessions (web lobby and garden game), shared through TigerData so a caregiver
+-- Live lobby sessions, shared through TigerData so a caregiver
 -- on any computer can watch a resident playing on another. Any API process reads and
 -- writes them. Rows are short-lived and pruned after a day.
 CREATE TABLE IF NOT EXISTS live_sessions (
@@ -253,12 +208,10 @@ ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS cur_ry REAL;
 
 -- Sessions live here, not in one API process's memory, so any API process can serve any
 -- request and a restart loses nothing. The API also applies this block at startup (live.SCHEMA_SQL).
--- kind: 'lobby' or 'garden'. token_hash: SHA-256 of the session's ingest token.
+-- token_hash: SHA-256 of the session's ingest token.
 -- running: the running measurements (measurements.SessionMetrics.to_state()).
-ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'garden';
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS token_hash TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS keyboard BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS folder TEXT;
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS running JSONB;
 CREATE UNIQUE INDEX IF NOT EXISTS live_sessions_token_idx ON live_sessions (token_hash);
 -- DualSense motion, when the lobby reads it over WebHID (blank, not zero, when it doesn't).

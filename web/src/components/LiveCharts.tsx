@@ -70,11 +70,11 @@ function useCanvas(
 
 // ---- live stick fields ------------------------------------------------------
 
-export function StickFields({ samples, inGame = false }: { samples: LiveSample[]; inGame?: boolean }) {
+export function StickFields({ samples }: { samples: LiveSample[] }) {
   const trail = samples.slice(-Math.round(HZ * 1.5));
   const last = trail[trail.length - 1];
-  // Lobby games that steer a hand: draw that hand, not the stick. Rat Catching has none, so it shows sticks.
-  inGame = inGame && !!last && HANDS.some((hd) => handCursor(last, hd));
+  // Games that steer a hand: draw that hand, not the stick. Rat Catching has none, so it shows sticks.
+  const inGame = !!last && HANDS.some((hd) => handCursor(last, hd));
   const handPos = inGame ? handPoint : stickPos;
   const ref = useCanvas(
     (ctx, w, h) => {
@@ -218,7 +218,7 @@ export function RollingChart({
           h - pad.b + 6,
         );
       }
-      // Chapter boundaries.
+      // Game boundaries.
       ctx.strokeStyle = cssVar("--muted");
       ctx.setLineDash([3, 4]);
       for (let k = 1; k < view.length; k++) {
@@ -297,7 +297,7 @@ export function RollingChart({
           Right hand
         </span>
         <span className="chart-key">
-          <span className="chart-dash" aria-hidden /> New chapter
+          <span className="chart-dash" aria-hidden /> New game
         </span>
       </div>
       <div className="rolling-wrap">
@@ -332,12 +332,6 @@ export function RollingChart({
 // ---- apple-by-apple bars ------------------------------------------------------
 
 const TRIAL_TEXT: Record<string, { one: string; title: string; caption: string; empty: string }> = {
-  garden: {
-    one: "Apple",
-    title: "Time to reach each apple",
-    caption: "One pair per apple; a rising pattern means reaches are getting slower. Lower is quicker.",
-    empty: "Appears as the apples are picked.",
-  },
   apple: {
     one: "Apple",
     title: "Time to pick each apple",
@@ -352,7 +346,7 @@ const TRIAL_TEXT: Record<string, { one: string; title: string; caption: string; 
   },
 };
 
-/** Lobby attempts arrive one hand at a time; pair them up by game and number like the garden's apples. */
+/** Attempts arrive one hand at a time; pair them up by game and number. */
 function lobbyRows(trials: ReachTrial[], level: string | null | undefined): [ReachTrial[], string] {
   const games = trials.map((t) => t.game).filter((g): g is string => !!g);
   const game = level && games.includes(level) ? level : games[games.length - 1];
@@ -366,15 +360,13 @@ function lobbyRows(trials: ReachTrial[], level: string | null | undefined): [Rea
 
 export function ReachTrialsChart({
   trials,
-  lobby = false,
   level,
 }: {
   trials: ReachTrial[];
-  lobby?: boolean;
   level?: string | null;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const [all, game] = lobby ? lobbyRows(trials, level) : [trials, "garden"];
+  const [all, game] = lobbyRows(trials, level);
   const text = TRIAL_TEXT[game] ?? TRIAL_TEXT.apple;
   const rows = all.filter((t) => t.left || t.right);
   if (rows.length === 0)
@@ -508,7 +500,7 @@ export function ReachTrialsChart({
                   <i style={{ background: `var(--hand-${h})` }} />{" "}
                   {h === "left" ? "Left" : "Right"}:{" "}
                   {r.reach_s == null ? "not reached" : secs(r.reach_s)} ·
-                  reaction {secs(r.reaction_s)} · {lobby ? "stick push" : "reach size"} {pct(r.reach_size)}
+                  reaction {secs(r.reaction_s)} · stick push {pct(r.reach_size)}
                 </span>
               ) : null;
             })}
@@ -649,15 +641,11 @@ export function PatternBars({
       </ul>
       {levels && levels.length > 0 && (
         <details className="pattern-levels">
-          <summary>
-            {levels.some((lv) => lv.level === "apple" || lv.level === "fish")
-              ? "Scores by game"
-              : "Scores by chapter"}
-          </summary>
+          <summary>Scores by game</summary>
           <table>
             <thead>
               <tr>
-                <th scope="col">Chapter</th>
+                <th scope="col">Game</th>
                 {PATTERN_ORDER.map((k) => (
                   <th scope="col" key={k}>
                     {PATTERN_LABELS[k]}
