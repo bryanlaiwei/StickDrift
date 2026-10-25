@@ -16,6 +16,12 @@ Web lobby games move an in-game hand with the stick instead of placing it, so
 their samples add [cx_l, cy_l, cx_r, cy_r]: where that hand is, in the same
 -1..1 space as the targets. Their reaches arrive as finished `trial` events
 measured by the game, because only the game knows when a target appeared.
+
+This module is the only definition of shake, tracking error and the per-hand
+reach numbers. The end-of-visit report (visit/report.py) imports `shake`,
+`track` and `hand_summary` from here rather than keeping its own copies.
+The running state round-trips through `to_state`/`from_state` (plain JSON), so
+any API process can pick a session up where another left it.
 """
 import math
 from collections import deque
@@ -66,6 +72,15 @@ class _ReachTrial:
                 if reached[h]:
                     st["reach"] = t - self.t0
 
+    def to_state(self) -> dict:
+        return {"trial": self.trial, "t0": self.t0, "hand": self.hand}
+
+    @classmethod
+    def from_state(cls, st: dict) -> "_ReachTrial":
+        out = cls(st["trial"], st["t0"])
+        out.hand = {h: dict(v) for h, v in st["hand"].items()}
+        return out
+
     def result(self):
         out = {"trial": self.trial}
         for h, st in self.hand.items():
@@ -81,6 +96,54 @@ class _ReachTrial:
         return out
 
 
+class _Shake:
+    """Leftover shake: how far each point sits from the SHAKE_WINDOW-sample average centred on it."""
+
+    def __init__(self):
+        self.window = deque(maxlen=SHAKE_WINDOW)
+        self.n = 0
+        self.sq = [0.0, 0.0]
+        self.flips = [0, 0]
+        self.last_sign = [0, 0]
+
+    def add(self, x, y):
+        self.window.append((x, y))
+        if len(self.window) < SHAKE_WINDOW:
+            return
+        cx, cy = self.window[SHAKE_WINDOW // 2]
+        mx = sum(p[0] for p in self.window) / SHAKE_WINDOW
+        my = sum(p[1] for p in self.window) / SHAKE_WINDOW
+        self.n += 1
+        for axis, res in enumerate((cx - mx, cy - my)):
+            self.sq[axis] += res * res
+            if abs(res) > SHAKE_DEADBAND:
+                sign = 1 if res > 0 else -1
+                if self.last_sign[axis] and sign != self.last_sign[axis]:
+                    self.flips[axis] += 1
+                self.last_sign[axis] = sign
+
+    def rms(self) -> Optional[float]:
+        return math.sqrt(sum(self.sq) / self.n) if self.n else None
+
+    def hz(self, span: float) -> Optional[float]:
+        shake = self.rms()
+        if span <= 1 or not shake or shake < 0.004:
+            return None
+        axis = 0 if self.sq[0] >= self.sq[1] else 1
+        return round(self.flips[axis] / 2 / span, 1)
+
+    def to_state(self) -> dict:
+        return {"window": [list(p) for p in self.window], "n": self.n, "sq": self.sq,
+                "flips": self.flips, "last_sign": self.last_sign}
+
+    @classmethod
+    def from_state(cls, st: dict) -> "_Shake":
+        out = cls()
+        out.window.extend(tuple(p) for p in st["window"])
+        out.n, out.sq, out.flips, out.last_sign = st["n"], list(st["sq"]), list(st["flips"]), list(st["last_sign"])
+        return out
+
+
 class _Tracker:
     """Distance from a moving target plus leftover shake, for one hand."""
 
@@ -88,11 +151,7 @@ class _Tracker:
         self.n = 0
         self.err_sum = 0.0
         self.on = 0
-        self.window = deque(maxlen=SHAKE_WINDOW)
-        self.res_n = 0
-        self.res_sq = [0.0, 0.0]
-        self.flips = [0, 0]
-        self.last_sign = [0, 0]
+        self.shake = _Shake()
         self.t_first = None
         self.t_last = None
 
@@ -105,31 +164,48 @@ class _Tracker:
         self.n += 1
         self.err_sum += err
         self.on += (err <= ON_TARGET_R) if on is None else bool(on)
-        self.window.append(shake_xy or (x, y))
-        if len(self.window) == SHAKE_WINDOW:
-            cx, cy = self.window[SHAKE_WINDOW // 2]
-            mx = sum(p[0] for p in self.window) / SHAKE_WINDOW
-            my = sum(p[1] for p in self.window) / SHAKE_WINDOW
-            self.res_n += 1
-            for axis, res in enumerate((cx - mx, cy - my)):
-                self.res_sq[axis] += res * res
-                if abs(res) > SHAKE_DEADBAND:
-                    sign = 1 if res > 0 else -1
-                    if self.last_sign[axis] and sign != self.last_sign[axis]:
-                        self.flips[axis] += 1
-                    self.last_sign[axis] = sign
+        self.shake.add(*(shake_xy or (x, y)))
 
     def result(self):
         if self.n == 0:
             return None
-        shake = math.sqrt(sum(self.res_sq) / self.res_n) if self.res_n else None
+        shake = self.shake.rms()
         span = (self.t_last - self.t_first) if self.t_first is not None else 0
-        axis = 0 if self.res_sq[0] >= self.res_sq[1] else 1
-        hz = self.flips[axis] / 2 / span if span > 1 else None
         return {"tracking_error": round(self.err_sum / self.n, 4), "on_target": round(self.on / self.n, 3),
                 "shake": None if shake is None else round(shake, 4),
-                "shake_hz": None if hz is None or not shake or shake < 0.004 else round(hz, 1),
+                "shake_hz": self.shake.hz(span),
                 "samples": self.n}
+
+    def to_state(self) -> dict:
+        return {"n": self.n, "err_sum": self.err_sum, "on": self.on, "shake": self.shake.to_state(),
+                "t_first": self.t_first, "t_last": self.t_last}
+
+    @classmethod
+    def from_state(cls, st: dict) -> "_Tracker":
+        out = cls()
+        out.n, out.err_sum, out.on = st["n"], st["err_sum"], st["on"]
+        out.shake = _Shake.from_state(st["shake"])
+        out.t_first, out.t_last = st["t_first"], st["t_last"]
+        return out
+
+
+def shake(points) -> Optional[float]:
+    """Leftover shake of a run of (x, y) points; None entries are skipped."""
+    s = _Shake()
+    for point in points:
+        if point is not None:
+            s.add(*point)
+    value = s.rms()
+    return None if value is None else round(value, 4)
+
+
+def track(samples) -> Optional[dict]:
+    """Tracker result for a run of (t, (x, y), (tx, ty), shake_xy, on) samples; ones missing a point are skipped."""
+    tracker = _Tracker()
+    for t, xy, target, shake_xy, on in samples:
+        if xy is not None and target is not None:
+            tracker.update(t, *xy, *target, shake_xy=shake_xy, on=on)
+    return tracker.result()
 
 
 class SessionMetrics:
@@ -138,6 +214,24 @@ class SessionMetrics:
         self.reach_trials: List[dict] = []
         self.open_trial: Optional[_ReachTrial] = None
         self.trackers: Dict[str, Dict[str, _Tracker]] = {}
+
+    def to_state(self) -> dict:
+        return {"level": self.level, "reach_trials": self.reach_trials,
+                "open_trial": None if self.open_trial is None else self.open_trial.to_state(),
+                "trackers": {lv: {h: tr.to_state() for h, tr in by_hand.items()}
+                             for lv, by_hand in self.trackers.items()}}
+
+    @classmethod
+    def from_state(cls, st: Optional[dict]) -> "SessionMetrics":
+        out = cls()
+        if not st:
+            return out
+        out.level = st.get("level")
+        out.reach_trials = list(st.get("reach_trials") or [])
+        out.open_trial = _ReachTrial.from_state(st["open_trial"]) if st.get("open_trial") else None
+        out.trackers = {lv: {h: _Tracker.from_state(tr) for h, tr in by_hand.items()}
+                        for lv, by_hand in (st.get("trackers") or {}).items()}
+        return out
 
     def start_level(self, level):
         self.close_trial()
@@ -229,18 +323,24 @@ def hand_summary(hand: str, trials: List[dict], tracks: List[dict]) -> dict:
     else:
         out["speed_change_pct"] = None
 
-    total = sum(x["samples"] for x in tracks)
-    if total:
-        out["tracking_error"] = round(sum(x["tracking_error"] * x["samples"] for x in tracks) / total, 4)
-        out["on_target"] = round(sum(x["on_target"] * x["samples"] for x in tracks) / total, 3)
-        shakes = [x for x in tracks if x["shake"] is not None]
-        out["shake"] = (round(sum(x["shake"] * x["samples"] for x in shakes) / sum(x["samples"] for x in shakes), 4)
-                        if shakes else None)
-        hz = [x["shake_hz"] for x in tracks if x["shake_hz"]]
-        out["shake_hz"] = round(median(hz), 1) if hz else None
-    else:
-        out.update(tracking_error=None, on_target=None, shake=None, shake_hz=None)
+    out.update(combine_tracks(tracks))
     return out
+
+
+def combine_tracks(tracks: List[dict]) -> dict:
+    """Several tracker results as one: sample-weighted error, time on target and shake; median shake Hz."""
+    total = sum(x["samples"] for x in tracks)
+    if not total:
+        return {"tracking_error": None, "on_target": None, "shake": None, "shake_hz": None}
+    shakes = [x for x in tracks if x["shake"] is not None]
+    hz = [x["shake_hz"] for x in tracks if x["shake_hz"]]
+    return {
+        "tracking_error": round(sum(x["tracking_error"] * x["samples"] for x in tracks) / total, 4),
+        "on_target": round(sum(x["on_target"] * x["samples"] for x in tracks) / total, 3),
+        "shake": (round(sum(x["shake"] * x["samples"] for x in shakes) / sum(x["samples"] for x in shakes), 4)
+                  if shakes else None),
+        "shake_hz": round(median(hz), 1) if hz else None,
+    }
 
 
 def game_summary(summary: dict, game: str) -> dict:

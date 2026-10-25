@@ -1,8 +1,8 @@
 """Caregiver read endpoints for residents' history and performance.
 
-Residents do not get a history view; only caregivers see results. Insights come
-from `insights.analyze` (earlier session summaries compared with the resident's own
-baseline) plus the TCN pattern judgement of their latest garden session.
+Residents do not get a history view; only caregivers see results. Insights compare
+the latest game visits with the resident's own earlier visits (`insights.resident_insights`)
+and add the pattern model's judgement of their latest judged garden session and game visit.
 """
 from typing import Any, List, Optional
 from uuid import UUID
@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from . import hand_replays, live
 from .auth import current_caregiver
 from .db import pool
-from .insights import add_model_concerns, analyze, review_from
+from .insights import add_model_concerns, resident_insights, review_from
 
 router = APIRouter(tags=["views"])
 
@@ -168,12 +168,9 @@ def resident_profile(conn, participant_id: UUID) -> Optional[dict]:
     sessions = _fetch_sessions(conn, participant_id)
     garden = _fetch_garden(conn, participant_id)
     games = _fetch_games(conn, participant_id)
-    insights = add_model_concerns(analyze(sessions), garden)
+    insights = add_model_concerns(resident_insights(sessions, games), garden)
     insights = add_model_concerns(insights, games, kind="lobby")
     insights["game_visits"] = len(games)
-    if insights["status"] == "insufficient" and not garden and games and not insights["concerns"]:
-        insights["summary"] = (f"{len(games)} game {'visit' if len(games) == 1 else 'visits'} recorded. "
-                               "Lobby games are shown visit by visit; they don't set a baseline yet.")
     return {
         "participant_id": p["participant_id"], "username": p["username"],
         "display_name": p["alias"], "dominant_hand": p["dominant_hand"],

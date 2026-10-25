@@ -1,14 +1,12 @@
 """Caregiver assistant: natural-language questions about residents' results.
 
-Answers are grounded in a facts block built only from stored sessions and the
+Answers are grounded in a facts block built only from stored visits and the
 deterministic insights. Gemini writes the answer when GEMINI_API_KEY is set;
 otherwise (or on any failure) a rule-based answer is built from the same facts.
-Every Gemini answer is checked: a disease name other than the pattern model's own
-pattern names withholds it, and numbers that do not appear in the facts are
-reported back as unverified.
+Every Gemini answer is checked: any disease or condition name withholds it, and
+numbers that do not appear in the facts are reported back as unverified.
 """
 import logging
-import os
 import re
 from typing import List, Literal, Optional
 from uuid import UUID
@@ -16,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from . import gemini
 from .auth import current_caregiver
 from .db import pool
 from .insights import PATTERN_LABELS, fmt
@@ -24,36 +23,33 @@ from .views import all_profiles, resident_profile
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["assistant"])
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-# Tried in order when the primary model is overloaded or rate-limited.
-GEMINI_FALLBACKS = ["gemini-3.5-flash", "gemini-flash-latest"]
-
-# The pattern model's names (Parkinson's, stroke, essential tremor) are shown on the site, so answers may
-# use them as pattern names. Every other condition name is refused, including diabetes and ataxia, which
-# the model no longer scores.
+# Caregivers only ever see neutral movement labels (insights.PATTERN_LABELS), so every condition name is
+# refused, including the ones the pattern model's training folders are named after.
 BANNED_WORDS = re.compile(
-    r"\b(diabet\w*|ataxi\w*|dementia|alzheimer\w*|multiple sclerosis|amyotrophic|huntington\w*|"
-    r"neuropath\w*|tumou?rs?|cancer|transient ischa?emic|seizures?|epilep\w*)\b",
+    r"\b(parkinson\w*|strokes?|tremors?|diabet\w*|ataxi\w*|dementia|alzheimer\w*|multiple sclerosis|"
+    r"amyotrophic|huntington\w*|neuropath\w*|tumou?rs?|cancer|transient ischa?emic|seizures?|epilep\w*)\b",
     re.IGNORECASE,
 )
-BANNED_ACRONYMS = re.compile(r"\b(MS|ALS|TIA|PD)\b")
+BANNED_ACRONYMS = re.compile(r"\b(MS|ALS|TIA|PD|CVA)\b")
 
 
 def names_condition(text: str) -> bool:
     return bool(BANNED_WORDS.search(text) or BANNED_ACRONYMS.search(text))
 
 SYSTEM = """You are the Stick Drift care-team assistant in a long-term-care home. Caregivers ask about \
-residents' results from a short two-thumbstick game (PS5 controller) that measures response time and \
-accuracy for each hand and both hands together.
+residents' results from short games played with the two thumbsticks of a PS5 controller in a 3D lobby: \
+Apple Picking (reaching for apples with each hand), Harbour Fishing (steering along a moving lane with one \
+stick) and Rat Catching (flicking a stick toward a rat). The games measure each hand: reaction time, time to \
+reach a target, distance from the lane, time on the lane and leftover shake. A resident's latest game \
+visits are compared with their own earlier visits.
 
 Rules:
 - Use ONLY the FACTS block. Quote numbers exactly as written there; do not compute new numbers.
 - If the facts do not answer the question, say so plainly and suggest what to observe or record.
-- The pattern model scores resemblance to three patterns named Parkinson's, stroke and essential \
-tremor. You may use those names only as pattern resemblance ("resembled the Parkinson's \
-pattern, 34/100"). Never say or suggest a resident has a disease, and never name any other condition (for \
-example dementia or MS). The game is not a medical device. Talk about measured changes, possible everyday \
-contributors and the recommended checks that appear in the facts.
+- The pattern model rates resemblance to movement patterns, written in the facts as plain descriptions \
+("slower, smaller movements in both hands, 34/100"). Use only those descriptions. Never name a disease or \
+medical condition, and never say or suggest a resident has one. The games are not a medical device. Talk \
+about measured changes, possible everyday contributors and the recommended checks that appear in the facts.
 - If a sudden new weakness, facial droop or speech difficulty is mentioned, tell the caregiver to follow \
 the facility's urgent escalation protocol.
 - Say when data is simulated (synthetic).
@@ -98,23 +94,28 @@ def _session_line(s: dict) -> str:
             f"{' | simulated' if s.get('is_synthetic') else ''}")
 
 
+def baseline_unit(ins: dict) -> str:
+    """What the baseline is made of: game visits, or a demo resident's older reaction-test sessions."""
+    return "game visit" if ins.get("source") == "lobby" else "reaction-test session"
+
+
 def _resident_facts(p: dict, full: bool) -> str:
     ins = p["insights"]
     games, garden = p.get("game_sessions", []), p.get("garden_sessions", [])
+    unit = baseline_unit(ins)
+    activity = [f"{len(games)} game visits", f"{len(garden)} garden visits"]
+    if p["sessions"]:
+        activity.append(f"{len(p['sessions'])} earlier reaction-test sessions")
     lines = [f"RESIDENT: {p['display_name']} (dominant hand: {p['dominant_hand']}, recorded activity: "
-             f"{len(games)} game visits, {len(garden)} garden visits, {len(p['sessions'])} reaction-test sessions "
-             f"({ins['usable_sessions']} usable for a baseline)"
+             f"{', '.join(activity)}; {ins['usable_sessions']} {unit}s usable for a baseline"
              f"{', data is SIMULATED/synthetic' if ins['synthetic'] else ''})",
              f"Overall: risk level '{ins['risk']}'. {ins['summary']}"]
-    if ins["status"] != "ok" and (games or garden):
-        lines.append("The baseline above needs reaction-test sessions. Game and garden visits are real recorded "
-                     "activity; they are described visit by visit and do not set a baseline.")
     if ins["status"] == "ok":
-        lines.append(f"Baseline = median of {ins['baseline_sessions']} earlier sessions; latest = most recent session.")
+        lines.append(f"Baseline = median of {ins['baseline_sessions']} earlier {unit}s; latest = most recent {unit}.")
         lines.append("Measurements (latest vs usual, change):")
         for f in ins["findings"]:
             tag = "CHANGED" if f["flagged"] else f["direction"]
-            lines.append(f"  - {f['text']} [{tag}{', persisted across recent sessions' if f['persistent'] else ''}]")
+            lines.append(f"  - {f['text']} [{tag}{f', persisted across recent {unit}s' if f['persistent'] else ''}]")
     for c in ins["concerns"]:
         lines.append(f"POTENTIAL CONCERN ({c['level']}): {c['title']} - {c['summary']}")
         lines.append("  Evidence: " + " ".join(c["evidence"]))
@@ -124,7 +125,7 @@ def _resident_facts(p: dict, full: bool) -> str:
             lines.append("  Research basis: " + " | ".join(c["references"]))
     if games:
         pad = [g for g in games if not g.get("is_synthetic")]
-        lines.append(f"Game visits (web lobby games, newest first, {len(games)} total; free play, no baseline):")
+        lines.append(f"Game visits (web lobby games, newest first, {len(games)} total):")
         lines += [f"  {_game_line(g)}" for g in pad[: 10 if full else 1]]
         if len(pad) < len(games):
             lines.append(f"  {len(games) - len(pad)} other game visits used keyboard input instead of the controller. "
@@ -264,8 +265,7 @@ def _rules_answer(q: str, profiles: List[dict], focus: Optional[dict]) -> str:
         return "\n".join(out)
 
     ins, name = focus["insights"], focus["display_name"]
-    if ins["status"] != "ok":
-        return f"{name}: {ins['summary']}"
+    unit = baseline_unit(ins)
     findings = ins["findings"]
 
     def pick(*words):
@@ -273,30 +273,39 @@ def _rules_answer(q: str, profiles: List[dict], focus: Optional[dict]) -> str:
 
     if pick("recommend", "should", "check", "next", "do ", "action"):
         if not ins["concerns"]:
-            return f"No checks are recommended for {name} right now; recent sessions match their usual pattern."
+            return f"No checks are recommended for {name} right now; recent {unit}s match their usual pattern."
         out = []
         for c in ins["concerns"]:
             out.append(f"{c['title']}:")
             out += [f"- {x}" for x in c["recommended_checks"]]
         return "\n".join(out)
 
-    keys = None
-    if pick("left"):
-        keys = {"left_latency", "left_accuracy", "lr_gap"}
-    elif pick("right"):
-        keys = {"right_latency", "right_accuracy", "lr_gap"}
-    elif pick("accura", "correct", "miss"):
-        keys = {"left_accuracy", "right_accuracy", "both_accuracy"}
-    elif pick("slow", "fast", "speed", "response", "reaction", "time"):
-        keys = {"left_latency", "right_latency", "lr_gap"}
-    elif pick("enjoy", "mood", "engag", "like"):
-        keys = {"enjoyment"}
-    elif pick("both", "coordinat", "two"):
-        keys = {"both_accuracy"}
+    if ins["status"] != "ok":
+        out = [f"{name}: {ins['summary']}"]
+        latest = next((g for g in focus.get("game_sessions", []) if not g.get("is_synthetic") and g.get("games")), None)
+        if latest is not None:
+            out.append(f"Latest game visit ({_when(latest['started_at'])}):")
+            out += [f"- {game}: {text}" for game, text in game_parts(latest)]
+        out += [f"Potential concern ({c['level']}): {c['title']}." for c in ins["concerns"]]
+        return "\n".join(out)
 
-    if keys is not None:
-        rows = [f"- {f['text']}" for f in findings if f["key"] in keys]
-        return f"{name}, latest session compared with their usual:\n" + "\n".join(rows or ["- No data for that yet."])
+    hand = "left" if pick("left") else "right" if pick("right") else None
+    kinds = None
+    if hand is None:
+        if pick("accura", "correct", "miss", "lane", "track", "distance"):
+            kinds = {"accuracy", "distance", "share"}
+        elif pick("slow", "fast", "speed", "response", "reaction", "time", "reach"):
+            kinds = {"latency", "gap", "seconds"}
+        elif pick("enjoy", "mood", "engag", "like"):
+            kinds = {"enjoyment"}
+        elif pick("both", "coordinat", "two"):
+            hand = "both"
+
+    if hand or kinds:
+        rows = [f"- {f['text']}" for f in findings
+                if (hand and f["hand"] == hand) or (hand in ("left", "right") and f["key"] == "lr_gap")
+                or (kinds and f["kind"] in kinds)]
+        return f"{name}, latest {unit} compared with their usual:\n" + "\n".join(rows or ["- No data for that yet."])
 
     out = [f"{name}: {ins['summary']}"]
     changed = [f for f in findings if f["flagged"]]
@@ -309,20 +318,11 @@ def _rules_answer(q: str, profiles: List[dict], focus: Optional[dict]) -> str:
 
 # ---- Gemini -----------------------------------------------------------------
 
-_client = None
-
-
 def _gemini(facts: str, body: Ask) -> Optional[str]:
-    global _client
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
+    if not gemini.available():
         return None
-    from google import genai
-    from google.genai import errors as genai_errors
     from google.genai import types
 
-    if _client is None:
-        _client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=30000))
     contents = [types.Content(role="model" if t.role == "assistant" else "user", parts=[types.Part(text=t.text)])
                 for t in body.history[-10:]]
     contents.append(types.Content(role="user", parts=[types.Part(text=f"FACTS:\n{facts}\n\nQUESTION: {body.question}")]))
@@ -332,17 +332,7 @@ def _gemini(facts: str, body: Ask) -> Optional[str]:
         max_output_tokens=700,
         thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
-    models = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACKS if m != GEMINI_MODEL]
-    for i, model in enumerate(models):
-        try:
-            resp = _client.models.generate_content(model=model, contents=contents, config=config)
-            break
-        except genai_errors.APIError as e:
-            # Overloaded / rate-limited: try the next model. Anything else is a real error.
-            if e.code not in (429, 500, 503) or i == len(models) - 1:
-                raise
-            log.warning("Gemini %s returned %s, trying %s", model, e.code, models[i + 1])
-    text = "".join(p.text for p in (resp.candidates[0].content.parts or []) if getattr(p, "text", None) and not getattr(p, "thought", False))
+    text = gemini.generate(contents, config, timeout_ms=30000)
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text).replace("**", "")
     return text.strip() or None
 
@@ -373,7 +363,7 @@ def ask(body: Ask, _: dict = Depends(current_caregiver)):
                             "withheld. This answer was built from the records directly.")
 
     if text is None:
-        if note is None and not os.environ.get("GEMINI_API_KEY"):
+        if note is None and not gemini.available():
             note = "Rule-based answer. Add GEMINI_API_KEY to backend/.env for conversational AI answers."
         answer = _rules_answer(body.question, profiles, focus)
         if asked_condition:

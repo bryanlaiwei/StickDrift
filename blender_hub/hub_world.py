@@ -863,7 +863,7 @@ class AppleGame:
 # --------------------------------------------------------------------------- Game 2: harbour fishing
 # First-person on a dock. Left stick moves the rod tip and traces a random shape along the water that a fish
 # is swimming; when it is complete the rod goes to the right hand, which traces a second random shape. Then both
-# fish are reeled into the bucket. Like trace.py: velocity-controlled cursor, lane tolerance, % on path.
+# fish are reeled into the bucket. Velocity-controlled cursor, lane tolerance, % on path.
 WY0 = 402.0                                   # world y of the water-plane origin
 FISH_CAM_POS, FISH_CAM_PITCH = (0.0, 394.5, 5.2), math.radians(60)
 LANE_HALF, LANE_VIS, LANE_STEP = 0.5, 0.42, 0.15    # tolerance / drawn half-width / point spacing (m)
@@ -875,7 +875,7 @@ FISH_COL = {"A": (0.95, 0.42, 0.08), "B": (0.10, 0.55, 0.85)}
 
 
 def catmull(p0, p1, p2, p3, t):
-    """Uniform Catmull-Rom spline point between p1 and p2 (same spline as trace.py)."""
+    """Uniform Catmull-Rom spline point between p1 and p2 (the old pygame trace game used the same one)."""
     return tuple(0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t * t
                         + (-a + 3 * b - 3 * c + d) * t ** 3) for a, b, c, d in zip(p0, p1, p2, p3))
 

@@ -4,13 +4,11 @@ Gemini writes the narrative as structured JSON in a clinical-documentation regis
 (objective observations kept apart from interpretation, graded hedging, explicit
 limitations). The facts, tables, charts, scope statement and disclaimer are built
 deterministically, so the model never touches them. Every Gemini draft is checked:
-a condition name (other than the pattern model's own pattern names), a number that
-is not in the facts, or emotive wording sends it back
-for one revision and then falls back to a template built from the same facts.
+a condition name, a number that is not in the facts, or emotive wording sends it
+back for one revision and then falls back to a template built from the same facts.
 """
 import json
 import logging
-import os
 import re
 from datetime import datetime, timezone, tzinfo
 from io import BytesIO
@@ -30,7 +28,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from .assistant import GEMINI_FALLBACKS, GEMINI_MODEL, build_facts, game_parts, names_condition, unverified
+from . import gemini
+from .assistant import baseline_unit, build_facts, game_parts, names_condition, unverified
 from .auth import current_caregiver
 from .db import pool
 from .insights import fmt
@@ -67,10 +66,10 @@ population norm) and flag any simulated data.
 Hard rules
 - Use ONLY the FACTS block. Quote numbers exactly as written there (for example 0.82 s, 75%, -2 pts). Do not \
 compute, round or invent numbers, dates, doses, diagnoses, history or caregiver actions.
-- The pattern model scores resemblance to three patterns named Parkinson's, stroke and essential \
-tremor. Use those names only as pattern resemblance ("resembled the Parkinson's pattern, 34/100"). NEVER \
-state or imply that the resident has a disease, and never name any other condition (for example dementia, MS, \
-diabetes, ataxia, neuropathy). Otherwise describe the functional change ("slower left-hand responses").
+- The pattern model rates resemblance to movement patterns, written in the facts as plain descriptions \
+("slower, smaller movements in both hands, 34/100"). Use only those descriptions. NEVER name a disease or \
+medical condition, and never state or imply that the resident has one. Otherwise describe the functional \
+change ("slower left-hand responses").
 - Possible contributors are everyday, non-diagnostic factors (tiredness, pain, medication change, vision, \
 setup), offered for the clinician to consider, never as conclusions.
 - If an irregularity involves new one-sided weakness, facial droop or speech difficulty, a consideration must \
@@ -102,17 +101,9 @@ SCHEMA = {
     "required": ["summary", "data_description", "observations", "irregularities", "limitations", "considerations"],
 }
 
-_client = None
-
-
 def _call_gemini(facts: str, feedback: Optional[str]) -> dict:
-    global _client
-    from google import genai
-    from google.genai import errors as genai_errors
     from google.genai import types
 
-    if _client is None:
-        _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"], http_options=types.HttpOptions(timeout=60000))
     prompt = f"FACTS:\n{facts}\n\nWrite the clinician summary now."
     if feedback:
         prompt += f"\n\nYour previous draft was rejected: {feedback} Revise it and fix this."
@@ -121,17 +112,7 @@ def _call_gemini(facts: str, feedback: Optional[str]) -> dict:
         response_mime_type="application/json", response_schema=SCHEMA,
         thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
-    models = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACKS if m != GEMINI_MODEL]
-    for i, model in enumerate(models):
-        try:
-            resp = _client.models.generate_content(model=model, contents=prompt, config=config)
-            break
-        except genai_errors.APIError as e:
-            if e.code not in (429, 500, 503) or i == len(models) - 1:
-                raise
-    text = "".join(p.text for p in (resp.candidates[0].content.parts or [])
-                   if getattr(p, "text", None) and not getattr(p, "thought", False))
-    return json.loads(text)
+    return json.loads(gemini.generate(prompt, config, timeout_ms=60000))
 
 
 def _strings(v) -> List[str]:
@@ -147,8 +128,7 @@ def _strings(v) -> List[str]:
 def _problems(draft: dict, facts: str, has_concerns: bool) -> Optional[str]:
     text = "\n".join(_strings(draft))
     if names_condition(text):
-        return ("It named a medical condition outside the pattern model's pattern names. Describe only the "
-                "measured functional change.")
+        return "It named a medical condition. Describe only the measured functional change."
     extra = unverified(text, facts)
     if extra:
         return f"These numbers are not in the FACTS block: {', '.join(extra[:6])}. Use only numbers from FACTS."
@@ -169,25 +149,27 @@ def _template_draft(p: dict) -> dict:
         garden = p.get("garden_sessions", [])
         if not games and not garden:
             return {"summary": ins["summary"],
-                    "data_description": f"{ins['usable_sessions']} usable completed sessions are on record.",
+                    "data_description": f"{_n(ins['usable_sessions'], 'usable ' + baseline_unit(ins))} on record.",
                     "observations": [], "irregularities": [],
-                    "limitations": ["A personal baseline needs at least 4 usable sessions."],
-                    "considerations": ["Consider generating this report again after more sessions are recorded."]}
+                    "limitations": [f"A personal baseline needs at least 4 usable {baseline_unit(ins)}s."],
+                    "considerations": ["Consider generating this report again after more visits are recorded."]}
         latest = next((g for g in games if not g["is_synthetic"]), games[0]) if games else None
         observations = [{"measure": f"{name} ({_fmt_when(latest['started_at'])})", "statement": text.capitalize() + "."}
                         for name, text in game_parts(latest)] if latest else []
-        return {"summary": f"{len(games)} game visits and {len(garden)} garden visits are recorded. These are "
-                           "described visit by visit; a personal baseline for flagging changes is not set yet.",
+        return {"summary": f"{len(games)} game visits and {len(garden)} garden visits are recorded. "
+                           f"{ins['summary']}",
                 "data_description": "Measurements come from the web lobby games (Apple Picking, Harbour Fishing, "
-                                    "Rat Catching) and the garden game, played in free play. Each visit is shown on "
-                                    "its own; none is used as a baseline.",
+                                    "Rat Catching) and the garden game. Until enough visits with the controller "
+                                    "are recorded, each visit is shown on its own.",
                 "observations": observations, "irregularities": [],
-                "limitations": ["Free-play games do not set a personal baseline, so changes are not flagged."],
+                "limitations": ["A personal baseline needs at least 4 game visits with the controller, so changes "
+                                "are not flagged yet."],
                 "considerations": ["Consider comparing left and right hands across the visits listed below."]}
+    unit = baseline_unit(ins)
     return {
         "summary": ins["summary"],
-        "data_description": f"The latest session was compared with the median of {ins['baseline_sessions']} "
-                            "earlier sessions from the same resident.",
+        "data_description": f"The latest {unit} was compared with the median of {ins['baseline_sessions']} "
+                            f"earlier {unit}s from the same resident.",
         "observations": [{"measure": f["label"], "statement": f["text"]} for f in ins["findings"]],
         "irregularities": [{
             "title": c["title"], "description": c["summary"] + " " + " ".join(c["evidence"]),
@@ -203,7 +185,7 @@ def _template_draft(p: dict) -> dict:
 def draft_report(p: dict, facts: str):
     """Returns (draft, source, note)."""
     has_concerns = bool(p["insights"]["concerns"])
-    if not os.environ.get("GEMINI_API_KEY"):
+    if not gemini.available():
         return _template_draft(p), "template", "Template wording (no Gemini key configured)."
     feedback = None
     for attempt in range(2):
@@ -401,7 +383,9 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
     activity = [_n(len(games), "game visit")] if games else []
     activity += [_n(len(garden), "garden visit")] if garden else []
     if p["sessions"]:
-        activity.append(f"{_n(len(done), 'reaction-test session')} ({ins['usable_sessions']} usable for comparison)")
+        activity.append(_n(len(done), "reaction-test session"))
+    if ins["status"] == "ok":
+        activity.append(f"baseline from {_n(ins['usable_sessions'], baseline_unit(ins))}")
     if ins["synthetic"] or any(g["is_synthetic"] for g in garden):
         synth = "Yes. Some or all data are simulated and not from a real person."
     elif keyboard:
@@ -532,7 +516,7 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
                _tbl(rows, [1.35 * inch, 1.1 * inch] + [(W - 2.45 * inch) / 5] * 5)]
 
     lim = list(draft["limitations"]) + [
-        "Comparison is against this resident's own earlier sessions, not a population norm.",
+        "Comparison is against this resident's own earlier visits, not a population norm.",
         "Controller input reflects thumb movement and attention during a game; it cannot identify a cause.",
         "Results can be affected by tiredness, pain, medication, vision, mood, seating and how the controller was held."]
     if ins["synthetic"]:

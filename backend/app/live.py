@@ -1,17 +1,21 @@
-"""Launch the garden game for a resident, stream it live, and judge it when it ends.
+"""Live sessions: the resident's web lobby (and the older garden game) streamed to caregivers.
 
-The API and the controller are on the same computer, so the API starts the game
-as a local process. The game posts ~100 Hz samples and level events back to that
-API with a one-time token. That API writes the live state and samples to
-TigerData (`live_sessions`, `live_samples`), so a caregiver signed in on any
-computer sharing the database can watch. When the game process exits, its
-CSV/JSON folder is scored by the TCN pattern model (run in the project's Python
-3.14 environment) and imported into TigerData for the resident.
+The lobby tab and the garden game post samples and game events to /live/ingest
+with a token. Everything about a running session lives in TigerData:
+`live_sessions` holds its status, token hash and running measurements,
+`live_samples` its samples and `live_events` the in-game events the visit report
+needs. Each request loads the session row (locked), applies the batch and writes
+it back in one transaction. So any API process can serve any request, the API can
+run more than one worker, and restarting it does not lose a visit in progress:
+the tab keeps posting and the next request picks up where the last one stopped.
 
-Restarting the launching API mid-game drops that session's live stream and its
-end-of-session import; the game still saves its files for a later import.
+Caregivers on any computer sharing the database watch through live_stream.py.
+
+The garden game is the exception: the API that launched it watches its local
+process. If that API restarts mid-game, the stream keeps working but the
+end-of-game scoring does not run; the game still saves its files for a later import.
 """
-import copy
+import hashlib
 import json
 import logging
 import os
@@ -24,7 +28,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -35,7 +39,6 @@ from . import hand_replays
 from .auth import current_caregiver, current_senior
 from .db import pool
 from .live_metrics import SessionMetrics, game_summary
-from .lobby_record import RecordingError, end_session, start_session, write_level
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["live"])
@@ -52,31 +55,66 @@ CHANNEL = "stickdrift_live"  # NOTIFY channel; caregiver APIs LISTEN on it (see 
 NOTIFY_MAX = 7000            # Postgres caps a payload at 8000 bytes; bigger batches send only a pointer
 
 ACTIVE = {"starting", "waiting", "ready", "playing", "paused", "saving", "scoring"}
-STATE_EVERY_S = 0.5      # how often the running state/metrics row is rewritten
-HEARTBEAT_S = 5          # the launching API touches the row while the game runs
-STALE_S = 20             # an active row older than this lost its launching API
+OPEN = sorted(ACTIVE - {"scoring"})  # statuses that still accept samples
+STATE_EVERY_S = 0.5      # how often the caregiver-facing measurements are rewritten and announced
+HEARTBEAT_S = 5          # the launching API touches a garden row while the game runs
+STALE_S = 20             # an active row older than this lost its game or tab
 RECENT_H = 6             # finished sessions listed under "Just finished"
 LOBBY_GAMES = ("apple", "fish", "rat")
 KEEP_EVENTS = {"trial", "wrong", "basket", "expired", "result", "trace", "slam", "miss", "card_rat"}
-MAX_FRAMES = 24000       # a visit is a few minutes at 60 Hz; stop rather than grow without bound
-_FRAME_KEYS = (
-    "t", "trial", "phase", "lx", "ly", "rx", "ry",
-    "target_lx", "target_ly", "target_rx", "target_ry",
-    "on_l", "on_r",
-    "cursor_lx", "cursor_ly", "cursor_rx", "cursor_ry",
-)
+MAX_FRAMES = 24000       # a visit is a few minutes at 60 Hz; the report stops reading there
+MOTION_KEYS = ("gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z")
+
+# Applied at startup (and kept in backend/schema.sql), so a database set up before
+# sessions moved out of the API's memory needs no manual step.
+SCHEMA_SQL = """
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'garden';
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS token_hash TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS keyboard BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS folder TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS running JSONB;
+CREATE UNIQUE INDEX IF NOT EXISTS live_sessions_token_idx ON live_sessions (token_hash);
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS gyro_x REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS gyro_y REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS gyro_z REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS acc_x REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS acc_y REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS acc_z REAL;
+CREATE TABLE IF NOT EXISTS live_events (
+    id BIGSERIAL PRIMARY KEY,
+    live_id UUID NOT NULL REFERENCES live_sessions (live_id) ON DELETE CASCADE,
+    level TEXT NOT NULL,
+    event JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS live_events_live_idx ON live_events (live_id, id);
+"""
+
+
+def ensure_schema():
+    try:
+        with pool.connection() as conn:
+            conn.execute(SCHEMA_SQL)
+    except Exception:
+        log.exception("Could not add the live-session columns; apply backend/schema.sql by hand")
 
 
 def _now():
     return datetime.now(timezone.utc)
 
 
-class LiveSession:
-    """State kept by the API that launched the game. Everyone else reads TigerData."""
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
-    def __init__(self, participant_id: UUID, name: str, keyboard: bool):
-        self.id = uuid4()
-        self.token = secrets.token_urlsafe(32)
+
+def _num(v) -> Optional[float]:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+class LiveSession:
+    """One live session's state, loaded from live_sessions for each request and written back after it."""
+
+    def __init__(self, participant_id: UUID, name: str, keyboard: bool, live_id: Optional[UUID] = None):
+        self.id = live_id or uuid4()
         self.participant_id = participant_id
         self.name = name
         self.keyboard = keyboard
@@ -96,51 +134,43 @@ class LiveSession:
         self.result: Optional[dict] = None
         self.db_session_id: Optional[UUID] = None
         self.error: Optional[str] = None
-        self.proc: Optional[subprocess.Popen] = None
-        self.last_state_write = 0.0
-        self.reporting = False
         self.needs_save = False  # a lobby game just ended: copy the visit so far into the resident's history
-        # Lobby frames live here until the visit ends. They are never written to the database.
-        self.capture = {name: {"frames": [], "events": []} for name in LOBBY_GAMES}
 
-    def ingest(self, items: List[Any]) -> Tuple[List[tuple], bool]:
-        """Apply events and samples; returns (sample rows to store, whether status changed)."""
+    @classmethod
+    def from_row(cls, row: dict) -> "LiveSession":
+        s = cls(row["participant_id"], row["name"], row["keyboard"], live_id=row["live_id"])
+        s.created_at, s.ended_at = row["started_at"], row["ended_at"]
+        s.status, s.level = row["status"], row["level"]
+        s.levels, s.levels_done = list(row["levels"] or []), list(row["levels_done"] or [])
+        s.trial, s.phase, s.synthetic, s.folder = row["trial"], row["phase"], row["synthetic"], row["folder"]
+        s.seq = row["seq"]
+        s.metrics = SessionMetrics.from_state(row["running"])
+        s.result, s.db_session_id, s.error = row["result"], row["db_session_id"], row["error"]
+        return s
+
+    def ingest(self, items: List[Any]) -> Tuple[List[tuple], List[tuple], bool]:
+        """Apply events and samples; returns (sample rows, event rows, whether status changed)."""
         rows: List[tuple] = []
+        events: List[tuple] = []
         changed = False
         with self.lock:
             for item in items:
                 if isinstance(item, dict):
+                    if item.get("type") in KEEP_EVENTS and self.level in LOBBY_GAMES:
+                        events.append((self.id, self.level, Jsonb(item)))
                     changed |= self._event(item)
                 elif isinstance(item, list) and len(item) in (13, 17, 23) and self.level:
                     # garden: 13 values; web lobby: 17, plus 6 gyro/acc values when the pad reports them
                     core = item[:17]
+                    motion = [_num(v) for v in item[17:23]] if len(item) == 23 else []
                     self.seq += 1
                     self.metrics.add(core)
                     self.trial, self.phase = core[1], core[2]
-                    rows.append((self.id, self.seq, self.level, *core, *[None] * (17 - len(core))))
-                    self._keep_frame(item)
-        return rows, changed
-
-    def _keep_frame(self, item):
-        if self.level not in LOBBY_GAMES or len(item) < 17:
-            return
-        bucket = self.capture[self.level]
-        if len(bucket["frames"]) >= MAX_FRAMES:
-            bucket["truncated"] = True
-            return
-        frame = dict(zip(_FRAME_KEYS, item[:17]))
-        if len(item) >= 23:
-            frame["gyro_x"], frame["gyro_y"], frame["gyro_z"] = item[17], item[18], item[19]
-            frame["acc_x"], frame["acc_y"], frame["acc_z"] = item[20], item[21], item[22]
-        bucket["frames"].append(frame)
-
-    def _keep_event(self, event: dict):
-        if event.get("type") not in KEEP_EVENTS or self.level not in LOBBY_GAMES:
-            return
-        self.capture[self.level]["events"].append(dict(event))
+                    rows.append((self.id, self.seq, self.level, *core, *[None] * (17 - len(core)),
+                                 *motion, *[None] * (6 - len(motion))))
+        return rows, events, changed
 
     def _event(self, e: dict) -> bool:
-        self._keep_event(e)
         kind = e.get("type")
         if kind == "session_start":
             self.folder = e.get("folder")
@@ -182,79 +212,117 @@ class LiveSession:
         return True
 
 
-# Only sessions launched by this API process. Used for tokens and "one game per computer".
-SESSIONS: Dict[UUID, LiveSession] = {}
-BY_TOKEN: Dict[str, LiveSession] = {}
-REGISTRY_LOCK = threading.Lock()
-
-
-def _active_here(participant_id: Optional[UUID] = None) -> Optional[LiveSession]:
-    for s in SESSIONS.values():
-        if s.status in ACTIVE and (participant_id is None or s.participant_id == participant_id):
-            return s
-    return None
-
-
 # ---- TigerData persistence ----------------------------------------------------
 
-def _persist(s: LiveSession, with_metrics: bool = True):
+SESSION_COLUMNS = """live_id, participant_id, name, status, level, levels, levels_done, trial, phase, synthetic,
+                     keyboard, folder, seq, running, result, db_session_id, error, started_at, ended_at"""
+
+
+def _create(s: LiveSession, kind: str) -> str:
+    """Store a new session and return its token. Only the token's hash is kept."""
+    token = secrets.token_urlsafe(32)
+    with pool.connection() as conn:
+        conn.execute(
+            """INSERT INTO live_sessions
+               (live_id, participant_id, name, status, kind, token_hash, keyboard, synthetic, host,
+                running, started_at, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())""",
+            (s.id, s.participant_id, s.name, s.status, kind, _token_hash(token), s.keyboard, s.synthetic, HOST,
+             Jsonb(s.metrics.to_state()), s.created_at),
+        )
+        conn.execute("SELECT pg_notify(%s, %s)", (CHANNEL, json.dumps({"i": str(s.id), "st": 1})))
+    return token
+
+
+def _write(conn, s: LiveSession, announce: bool = True):
+    """Write the session back. `announce` also refreshes the caregiver-facing measurements and tells watchers."""
     with s.lock:
-        metrics = s.metrics.summary() if with_metrics else None
-        values = (s.id, s.participant_id, s.name, s.status, s.level, Jsonb(s.levels), Jsonb(s.levels_done),
-                  s.trial, s.phase, s.synthetic, s.seq, None if metrics is None else Jsonb(metrics),
-                  None if s.result is None else Jsonb(s.result), s.db_session_id, s.error, HOST,
-                  s.created_at, s.ended_at)
+        metrics = s.metrics.summary() if announce else None
+        values = (s.status, s.level, Jsonb(s.levels), Jsonb(s.levels_done), s.trial, s.phase, s.synthetic,
+                  s.keyboard, s.folder, s.seq, Jsonb(s.metrics.to_state()),
+                  None if metrics is None else Jsonb(metrics), None if s.result is None else Jsonb(s.result),
+                  s.db_session_id, s.error, s.ended_at, announce, s.id)
+    conn.execute(
+        """UPDATE live_sessions SET
+             status = %s, level = %s, levels = %s, levels_done = %s, trial = %s, phase = %s, synthetic = %s,
+             keyboard = %s, folder = %s, seq = %s, running = %s,
+             metrics = COALESCE(%s, metrics),
+             result = %s,
+             db_session_id = COALESCE(%s, db_session_id),
+             error = %s, ended_at = %s,
+             updated_at = CASE WHEN %s THEN now() ELSE updated_at END
+           WHERE live_id = %s""",
+        values,
+    )
+    if announce:
+        # Same transaction, so watchers are only told once the row is committed.
+        conn.execute("SELECT pg_notify(%s, %s)", (CHANNEL, json.dumps({"i": str(s.id), "st": 1})))
+
+
+def _persist(s: LiveSession):
     try:
         with pool.connection() as conn:
-            conn.execute(
-                """INSERT INTO live_sessions
-                   (live_id, participant_id, name, status, level, levels, levels_done, trial, phase,
-                    synthetic, seq, metrics, result, db_session_id, error, host, started_at, ended_at, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-                   ON CONFLICT (live_id) DO UPDATE SET
-                     status = EXCLUDED.status, level = EXCLUDED.level, levels = EXCLUDED.levels,
-                     levels_done = EXCLUDED.levels_done, trial = EXCLUDED.trial, phase = EXCLUDED.phase,
-                     synthetic = EXCLUDED.synthetic, seq = EXCLUDED.seq,
-                     metrics = COALESCE(EXCLUDED.metrics, live_sessions.metrics),
-                     result = EXCLUDED.result,
-                     db_session_id = COALESCE(EXCLUDED.db_session_id, live_sessions.db_session_id),
-                     error = EXCLUDED.error, ended_at = EXCLUDED.ended_at, updated_at = now()""",
-                values,
-            )
-            # Same transaction, so watchers are only told once the row is committed.
-            conn.execute("SELECT pg_notify(%s, %s)", (CHANNEL, json.dumps({"i": str(s.id), "st": 1})))
-        s.last_state_write = time.monotonic()
+            _write(conn, s)
     except Exception:
         log.exception("Could not write live session %s to TigerData", s.id)
 
 
-def _store_samples(rows: List[tuple]):
+def _load(live_id: UUID) -> Optional[LiveSession]:
+    with pool.connection() as conn:
+        row = conn.execute(f"SELECT {SESSION_COLUMNS} FROM live_sessions WHERE live_id = %s", (live_id,)).fetchone()
+    return None if row is None else LiveSession.from_row(row)
+
+
+def _store_samples(conn, rows: List[tuple]):
     if not rows:
         return
-    try:
-        with pool.connection() as conn, conn.cursor() as cur:
-            cur.executemany(
-                """INSERT INTO live_samples
-                   (live_id, seq, level, t, trial, phase, lx, ly, rx, ry,
-                    tgt_lx, tgt_ly, tgt_rx, tgt_ry, reached_l, reached_r, cur_lx, cur_ly, cur_rx, cur_ry)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT DO NOTHING""",
-                rows,
-            )
-            # Small batches ride in the notification itself, so watchers don't need to read the table.
-            live_id = str(rows[0][0])
-            payload = json.dumps({"i": live_id, "s": [list(r[1:]) for r in rows]}, separators=(",", ":"))
-            if len(payload) > NOTIFY_MAX:
-                payload = json.dumps({"i": live_id, "q": rows[-1][1]})
-            cur.execute("SELECT pg_notify(%s, %s)", (CHANNEL, payload))
-    except Exception:
-        log.exception("Could not write live samples to TigerData")
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO live_samples
+               (live_id, seq, level, t, trial, phase, lx, ly, rx, ry,
+                tgt_lx, tgt_ly, tgt_rx, tgt_ry, reached_l, reached_r, cur_lx, cur_ly, cur_rx, cur_ry,
+                gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       %s, %s, %s, %s, %s, %s)
+               ON CONFLICT DO NOTHING""",
+            rows,
+        )
+        # Small batches ride in the notification itself, so watchers don't need to read the table.
+        # Watchers get the same 19 values samples_since returns (no motion).
+        live_id = str(rows[0][0])
+        payload = json.dumps({"i": live_id, "s": [list(r[1:20]) for r in rows]}, separators=(",", ":"))
+        if len(payload) > NOTIFY_MAX:
+            payload = json.dumps({"i": live_id, "q": rows[-1][1]})
+        cur.execute("SELECT pg_notify(%s, %s)", (CHANNEL, payload))
 
 
-def _heartbeat(s: LiveSession):
+def _store_events(conn, rows: List[tuple]):
+    if rows:
+        with conn.cursor() as cur:
+            cur.executemany("INSERT INTO live_events (live_id, level, event) VALUES (%s, %s, %s)", rows)
+
+
+def _apply(conn, token: str, items: List[Any], kind: Optional[str] = None) -> Optional[LiveSession]:
+    """Lock the open session behind `token`, apply a batch and write it back. None if no such open session."""
+    row = conn.execute(
+        f"""SELECT {SESSION_COLUMNS}, kind, EXTRACT(EPOCH FROM (now() - updated_at)) AS quiet_s
+            FROM live_sessions WHERE token_hash = %s AND status = ANY(%s) FOR UPDATE""",
+        (_token_hash(token), OPEN),
+    ).fetchone()
+    if row is None or (kind is not None and row["kind"] != kind):
+        return None
+    s = LiveSession.from_row(row)
+    samples, events, changed = s.ingest(items)
+    _store_samples(conn, samples)
+    _store_events(conn, events)
+    _write(conn, s, announce=changed or float(row["quiet_s"]) >= STATE_EVERY_S)
+    return s
+
+
+def _heartbeat(live_id: UUID):
     try:
         with pool.connection() as conn:
-            conn.execute("UPDATE live_sessions SET updated_at = now() WHERE live_id = %s", (s.id,))
+            conn.execute("UPDATE live_sessions SET updated_at = now() WHERE live_id = %s", (live_id,))
     except Exception:
         log.exception("Live heartbeat failed")
 
@@ -268,9 +336,10 @@ def _prune_db():
         log.exception("Pruning old live sessions failed")
 
 
-# ---- end of session -------------------------------------------------------
+# ---- garden game: end of session ------------------------------------------------
 
 MODEL = ROOT / "runs" / "tcn" / "model.pt"
+GARDEN_PROCS: Dict[UUID, subprocess.Popen] = {}  # garden games this process launched on this computer
 
 
 def _score(folder: str) -> dict:
@@ -342,27 +411,43 @@ def _finalize(s: LiveSession):
     _persist(s)
 
 
-def _watch(s: LiveSession, log_file):
+def _watch(live_id: UUID, proc: subprocess.Popen, log_file):
     try:
         while True:
             try:
-                s.proc.wait(timeout=HEARTBEAT_S)
+                proc.wait(timeout=HEARTBEAT_S)
                 break
             except subprocess.TimeoutExpired:
-                _heartbeat(s)
+                _heartbeat(live_id)
     finally:
         log_file.close()
+    s = None
     try:
-        _finalize(s)
+        s = _load(live_id)  # the game's samples and events were applied by whichever process received them
+        if s is not None:
+            _finalize(s)
     except Exception:
         log.exception("Finalizing live session failed")
-        with s.lock:
-            s.status, s.ended_at = "failed", _now()
-            s.error = s.error or "Something went wrong while finishing this session."
-        _persist(s)
-    with REGISTRY_LOCK:
-        BY_TOKEN.pop(s.token, None)
-        SESSIONS.pop(s.id, None)
+        if s is not None:
+            with s.lock:
+                s.status, s.ended_at = "failed", _now()
+                s.error = s.error or "Something went wrong while finishing this session."
+            _persist(s)
+    finally:
+        GARDEN_PROCS.pop(live_id, None)
+
+
+def _garden_here(participant_id: Optional[UUID] = None) -> Optional[dict]:
+    """A garden game running on this computer (any API process on it), optionally only this resident's."""
+    with pool.connection() as conn:
+        return conn.execute(
+            """SELECT participant_id, status, level FROM live_sessions
+               WHERE kind = 'garden' AND host = %s AND status = ANY(%s)
+                 AND updated_at > now() - make_interval(secs => %s)
+                 AND (%s::uuid IS NULL OR participant_id = %s::uuid)
+               ORDER BY started_at DESC LIMIT 1""",
+            (HOST, sorted(ACTIVE), STALE_S, participant_id, participant_id),
+        ).fetchone()
 
 
 # ---- resident ---------------------------------------------------------------
@@ -378,20 +463,22 @@ class GardenStatus(BaseModel):
     level: Optional[str] = None
 
 
+_launch_lock = threading.Lock()
+
+
 @router.post("/me/garden/launch", response_model=GardenStatus, status_code=201)
 def launch(body: LaunchIn, me: dict = Depends(current_senior)):
     if not GAME_PYTHON.is_file():
         raise HTTPException(503, "The game isn't installed on this computer yet. Ask a staff member to run "
                                  "`uv sync` in the project folder.")
-    with REGISTRY_LOCK:
-        mine = _active_here(me["account_id"])
+    with _launch_lock:
+        mine = _garden_here(me["account_id"])
         if mine is not None:
-            return {"active": True, "status": mine.status, "level": mine.level}
-        if _active_here() is not None:
+            return {"active": True, "status": mine["status"], "level": mine["level"]}
+        if _garden_here() is not None:
             raise HTTPException(409, "Someone else is already playing on this computer. Try again in a few minutes.")
         s = LiveSession(me["account_id"], me["display_name"], body.keyboard)
-        SESSIONS[s.id] = s
-        BY_TOKEN[s.token] = s
+        token = _create(s, "garden")
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = open(LOG_DIR / f"{s.id}.log", "w")
@@ -399,50 +486,42 @@ def launch(body: LaunchIn, me: dict = Depends(current_senior)):
     cmd = [str(GAME_PYTHON), str(GAME_SCRIPT), "--player", player, "--label", "site", "--no-tiger-sync"]
     if body.keyboard:
         cmd.append("--demo")
-    env = {**os.environ, "STICKDRIFT_LIVE_URL": f"{API_URL}/live/ingest", "STICKDRIFT_LIVE_TOKEN": s.token}
+    env = {**os.environ, "STICKDRIFT_LIVE_URL": f"{API_URL}/live/ingest", "STICKDRIFT_LIVE_TOKEN": token}
     env.pop("DATABASE_URL", None)
     try:
-        s.proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=log_file, stderr=subprocess.STDOUT,
-                                  start_new_session=True)
+        proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=log_file, stderr=subprocess.STDOUT,
+                                start_new_session=True)
     except OSError as e:
         log_file.close()
-        with REGISTRY_LOCK:
-            SESSIONS.pop(s.id, None)
-            BY_TOKEN.pop(s.token, None)
+        s.status, s.ended_at, s.error = "failed", _now(), f"The game could not start ({e})."
+        _persist(s)
         raise HTTPException(500, f"The game could not start ({e}).")
-    _persist(s)
+    GARDEN_PROCS[s.id] = proc
     _prune_db()
-    threading.Thread(target=_watch, args=(s, log_file), name=f"garden-{s.id}", daemon=True).start()
+    threading.Thread(target=_watch, args=(s.id, proc, log_file), name=f"garden-{s.id}", daemon=True).start()
     return {"active": True, "status": s.status, "level": None}
 
 
 @router.get("/me/garden", response_model=GardenStatus)
 def my_garden(me: dict = Depends(current_senior)):
-    s = _active_here(me["account_id"])
-    return {"active": s is not None, "status": s.status if s else None, "level": s.level if s else None}
+    row = _garden_here(me["account_id"])
+    return {"active": row is not None, "status": row["status"] if row else None,
+            "level": row["level"] if row else None}
 
 
 # ---- browser lobby ------------------------------------------------------------
 # The 3D lobby (web/lobby.html) runs in the resident's own browser tab. It opens a
 # live session here with their login cookie and streams its stick samples to
-# /live/ingest like the garden game does. The samples also stay in memory. When
-# the tab closes, visit.report scores Apple Picking and Harbour Fishing, counts
-# Rat Catching, stores that document, and drops the frames.
+# /live/ingest like the garden game does. When the tab closes, the visit's in-game
+# samples and events are read back from live_samples/live_events, visit.report
+# scores Apple Picking and Harbour Fishing and counts Rat Catching, and that
+# document is stored with the visit.
 
-LOBBY_IDLE_S = 60        # a lobby tab that stopped posting this long ago is forgotten
+LOBBY_IDLE_S = 60        # a lobby tab that stopped posting this long ago is ended
 REPORT_TIMEOUT_S = 180
 REPLAY_TIMEOUT_S = 120   # drawing the reconstructed-hands GIF (hand_replay.from_capture)
 REPLAY_WAIT_S = 600      # how long a drawn GIF waits for the visit's session_id before it is dropped
-
-
-def _forget(s: LiveSession):
-    with REGISTRY_LOCK:
-        BY_TOKEN.pop(s.token, None)
-        SESSIONS.pop(s.id, None)
-
-
-def _played(capture: dict) -> bool:
-    return any(bucket.get("frames") or bucket.get("events") for bucket in capture.values())
+REPORT_RETRY_S = REPORT_TIMEOUT_S + 120  # a visit still "scoring" after this lost its API mid-report
 
 
 def _holds_frames(value) -> bool:
@@ -577,7 +656,6 @@ def _report_metrics(report: dict) -> dict:
             "meaning": model.get("meaning"),
             "schema_version": report.get("schema_version"),
         },
-        "live": report.get("live"),
         "visit": report,
     }
 
@@ -630,26 +708,73 @@ def _finish_visit(s: LiveSession, capture: dict, session_id: Optional[UUID] = No
         if replay is not None:
             replay.deliver(session_id)
 
+_CAPTURE_COLUMNS = (("t", "t"), ("trial", "trial"), ("phase", "phase"),
+                    ("lx", "lx"), ("ly", "ly"), ("rx", "rx"), ("ry", "ry"),
+                    ("target_lx", "tgt_lx"), ("target_ly", "tgt_ly"), ("target_rx", "tgt_rx"), ("target_ry", "tgt_ry"),
+                    ("on_l", "reached_l"), ("on_r", "reached_r"),
+                    ("cursor_lx", "cur_lx"), ("cursor_ly", "cur_ly"), ("cursor_rx", "cur_rx"), ("cursor_ry", "cur_ry"))
 
-def _end_lobby(s: LiveSession, status: str = "ended"):
-    with s.lock:
-        if s.reporting:
-            return
-        s.reporting = True
-        capture = copy.deepcopy(s.capture)
-        for bucket in s.capture.values():
-            bucket["frames"].clear()
-            bucket["events"].clear()
-            bucket.pop("truncated", None)
-        s.metrics.close_trial()
-        s.level = None
-        played = _played(capture)
-        if played:
-            s.status = "scoring"
+
+def _load_capture(live_id: UUID) -> dict:
+    """The visit's in-game frames and events, per game, in the shape visit.report reads."""
+    capture = {name: {"frames": [], "events": []} for name in LOBBY_GAMES}
+    columns = ", ".join(col for _, col in _CAPTURE_COLUMNS) + ", " + ", ".join(MOTION_KEYS)
+    with pool.connection() as conn:
+        for name in LOBBY_GAMES:
+            rows = conn.execute(
+                f"SELECT {columns} FROM live_samples WHERE live_id = %s AND level = %s ORDER BY seq LIMIT %s",
+                (live_id, name, MAX_FRAMES + 1),
+            ).fetchall()
+            bucket = capture[name]
+            if len(rows) > MAX_FRAMES:
+                rows, bucket["truncated"] = rows[:MAX_FRAMES], True
+            for r in rows:
+                frame = {key: r[col] for key, col in _CAPTURE_COLUMNS}
+                if r["gyro_x"] is not None:
+                    frame.update({key: r[key] for key in MOTION_KEYS})
+                bucket["frames"].append(frame)
+        for r in conn.execute("SELECT level, event FROM live_events WHERE live_id = %s ORDER BY id",
+                              (live_id,)).fetchall():
+            if r["level"] in capture:
+                capture[r["level"]]["events"].append(r["event"])
+    return capture
+
+
+def _played(conn, live_id: UUID) -> bool:
+    return conn.execute(
+        """SELECT EXISTS (SELECT 1 FROM live_samples WHERE live_id = %s AND level = ANY(%s))
+               OR EXISTS (SELECT 1 FROM live_events WHERE live_id = %s) AS played""",
+        (live_id, list(LOBBY_GAMES), live_id),
+    ).fetchone()["played"]
+
+
+def _end_lobby(live_id: Optional[UUID] = None, status: str = "ended", token: Optional[str] = None,
+               items: Optional[List[Any]] = None):
+    """Close an open lobby session (by id or by its token), save the visit, then score it in the background.
+
+    The row is locked while it closes, so when two processes try to end the same visit only one does.
+    """
+    with pool.connection() as conn, conn.transaction():
+        if token is not None:
+            s = _apply(conn, token, items or [], kind="lobby")
         else:
-            s.status, s.ended_at = status, _now()
-    _persist(s)
-    _forget(s)
+            row = conn.execute(
+                f"""SELECT {SESSION_COLUMNS} FROM live_sessions
+                    WHERE live_id = %s AND kind = 'lobby' AND status = ANY(%s) FOR UPDATE SKIP LOCKED""",
+                (live_id, OPEN),
+            ).fetchone()
+            s = None if row is None else LiveSession.from_row(row)
+        if s is None:
+            return
+        played = _played(conn, s.id)
+        with s.lock:
+            s.metrics.close_trial()
+            s.level = None
+            if played:
+                s.status = "scoring"
+            else:
+                s.status, s.ended_at = status, _now()
+        _write(conn, s)
     # Save the visit first (measurements + in-game samples), then add the pattern-model report to it.
     session_id = None
     try:
@@ -657,7 +782,23 @@ def _end_lobby(s: LiveSession, status: str = "ended"):
     except Exception:
         log.exception("Saving lobby visit %s failed; a later sweep will retry", s.id)
     if played:
-        threading.Thread(target=_finish_visit, args=(s, capture, session_id), daemon=True).start()
+        _score_visit(s, session_id)
+
+
+def _score_visit(s: LiveSession, session_id: Optional[UUID]):
+    def run():
+        try:
+            capture = _load_capture(s.id)
+        except Exception as error:
+            log.exception("Could not read lobby visit %s back for its report", s.id)
+            with s.lock:
+                s.status = "ended" if session_id is not None else "failed"
+                s.ended_at, s.error = _now(), str(error)
+            _persist(s)
+            return
+        _finish_visit(s, capture, session_id)
+
+    threading.Thread(target=run, name=f"visit-report-{s.id}", daemon=True).start()
 
 
 # ---- saving lobby visits to the resident's history ---------------------------------
@@ -760,22 +901,29 @@ def _keyboard_only(conn, live_id: UUID) -> bool:
     ).fetchone()["analog"]
     return not analog
 
-
 _last_sweep = 0.0
 
 
 def save_unsaved_lobbies(min_gap_s: float = 30.0) -> int:
-    """Save lobby visits that ended without being saved (a closed laptop, an older API). Cheap to call often."""
+    """Save lobby visits that ended without being saved (a closed laptop, an older API), and re-run reports
+    that an API lost mid-way. Cheap to call often."""
     global _last_sweep
     if time.monotonic() - _last_sweep < min_gap_s:
         return 0
     _last_sweep = time.monotonic()
     with pool.connection() as conn:
         ids = [r["live_id"] for r in conn.execute(
-            f"""SELECT l.live_id FROM live_sessions l LEFT JOIN sessions s ON s.session_id = l.db_session_id
-                WHERE l.levels ? 'lobby' AND (l.db_session_id IS NULL OR s.status = 'in_progress')
-                  AND (l.status NOT IN ({",".join(["%s"] * len(ACTIVE))}) OR l.updated_at < now() - make_interval(secs => %s))""",
-            (*ACTIVE, STALE_S),
+            """SELECT l.live_id FROM live_sessions l LEFT JOIN sessions s ON s.session_id = l.db_session_id
+               WHERE l.levels ? 'lobby' AND (l.db_session_id IS NULL OR s.status = 'in_progress')
+                 AND (l.status <> ALL(%s) OR l.updated_at < now() - make_interval(secs => %s))""",
+            (sorted(ACTIVE), STALE_S),
+        ).fetchall()]
+        # Claim a stuck report by touching the row, so only one process re-runs it.
+        stuck = [r["live_id"] for r in conn.execute(
+            """UPDATE live_sessions SET updated_at = now()
+               WHERE kind = 'lobby' AND status = 'scoring' AND updated_at < now() - make_interval(secs => %s)
+               RETURNING live_id""",
+            (REPORT_RETRY_S,),
         ).fetchall()]
     saved = 0
     for live_id in ids:
@@ -783,13 +931,23 @@ def save_unsaved_lobbies(min_gap_s: float = 30.0) -> int:
             saved += save_lobby(live_id) is not None
         except Exception:
             log.exception("Saving lobby visit %s failed", live_id)
+    for live_id in stuck:
+        s = _load(live_id)
+        if s is not None:
+            log.warning("Re-running the visit report for lobby session %s", live_id)
+            _score_visit(s, s.db_session_id)
     return saved
 
 
 def _prune_lobby():
-    cutoff = time.monotonic() - LOBBY_IDLE_S
-    for s in [s for s in SESSIONS.values() if s.proc is None and s.last_state_write < cutoff]:
-        _end_lobby(s, "lost")
+    with pool.connection() as conn:
+        ids = [r["live_id"] for r in conn.execute(
+            """SELECT live_id FROM live_sessions
+               WHERE kind = 'lobby' AND status = ANY(%s) AND updated_at < now() - make_interval(secs => %s)""",
+            (OPEN, LOBBY_IDLE_S),
+        ).fetchall()]
+    for live_id in ids:
+        _end_lobby(live_id, "lost")
 
 
 class LobbyStart(BaseModel):
@@ -799,34 +957,28 @@ class LobbyStart(BaseModel):
 @router.post("/me/lobby/start", status_code=201)
 def lobby_start(body: LobbyStart, me: dict = Depends(current_senior)):
     _prune_lobby()
-    for old in [s for s in SESSIONS.values() if s.proc is None and s.participant_id == me["account_id"]]:
-        _end_lobby(old)  # one open lobby per resident; a reload replaces the old tab
+    with pool.connection() as conn:
+        old = [r["live_id"] for r in conn.execute(
+            "SELECT live_id FROM live_sessions WHERE kind = 'lobby' AND participant_id = %s AND status = ANY(%s)",
+            (me["account_id"], OPEN),
+        ).fetchall()]
+    for live_id in old:
+        _end_lobby(live_id)  # one open lobby per resident; a reload replaces the old tab
     s = LiveSession(me["account_id"], me["display_name"], body.keyboard)
     s.status = "ready"
-    s.last_state_write = time.monotonic()
-    with REGISTRY_LOCK:
-        SESSIONS[s.id] = s
-        BY_TOKEN[s.token] = s
-    _persist(s)
+    token = _create(s, "lobby")
     _prune_db()
-    return {"live_id": s.id, "token": s.token}
+    return {"live_id": s.id, "token": token}
 
 
 class LiveEnd(BaseModel):
-    """The last samples ride with the close, so they are scored before the session is forgotten."""
+    """The last samples ride with the close, so they are scored before the session is closed."""
     items: List[Union[List[Any], Dict[str, Any]]] = Field(default_factory=list, max_length=5000)
 
 
 @router.post("/live/end", status_code=204)
 def lobby_end(x_live_token: str = Header(...), body: Optional[LiveEnd] = None):
-    s = BY_TOKEN.get(x_live_token)
-    if s is None or s.proc is not None:
-        return
-    if body is not None and body.items:
-        rows, _changed = s.ingest(body.items)
-        _store_samples(rows)
-        _persist(s)
-    _end_lobby(s)
+    _end_lobby(token=x_live_token, items=body.items if body is not None else [])
 
 
 # ---- game -------------------------------------------------------------------
@@ -837,15 +989,11 @@ class IngestIn(BaseModel):
 
 @router.post("/live/ingest")
 def ingest(body: IngestIn, x_live_token: str = Header(...)):
-    s = BY_TOKEN.get(x_live_token)
+    with pool.connection() as conn, conn.transaction():
+        s = _apply(conn, x_live_token, body.items)
     if s is None:
         raise HTTPException(410, "This live session is no longer open.")
-    rows, changed = s.ingest(body.items)
-    _store_samples(rows)
-    if changed or time.monotonic() - s.last_state_write >= STATE_EVERY_S:
-        _persist(s)
     if s.needs_save:
-        s.needs_save = False
         threading.Thread(target=_save_so_far, args=(s.id,), daemon=True).start()
     return {"ok": True}
 
@@ -938,58 +1086,3 @@ def live_snapshot(live_id: UUID, since: int = 0, limit: int = 2000, _: dict = De
     if st is None:
         raise HTTPException(404, "That live session was not found.")
     return {**st, "samples": samples_since(live_id, since, limit)}
-
-
-class RecordStart(BaseModel):
-    source: Literal["gamepad", "keyboard", "none"] = "keyboard"
-
-
-class RecordLevel(BaseModel):
-    live_id: str
-    folder: str = Field(max_length=40)
-    level: Literal["apple", "fish", "rat"]
-    completed: bool
-    duration_s: float
-    score: Optional[float] = None
-    stars: Optional[int] = None
-    source: Literal["gamepad", "keyboard", "none"] = "none"
-    motion: Literal["webhid", "none"] = "none"
-    trials: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
-    rows: List[List[Any]] = Field(max_length=20000)
-
-
-class RecordEnd(BaseModel):
-    live_id: str
-    folder: str = Field(max_length=40)
-
-
-def _recording_error(error: RecordingError) -> HTTPException:
-    return HTTPException(400, str(error))
-
-
-@router.post("/lobby/record/start", status_code=201)
-def lobby_record_start(body: RecordStart):
-    """Open a data/new_game_data folder for this lobby visit. No login required."""
-    try:
-        return start_session(body.source)
-    except RecordingError as error:
-        raise _recording_error(error) from error
-
-
-@router.post("/lobby/record/level")
-def lobby_record_level(body: RecordLevel):
-    """Write one finished game (apple, fish, or rat) into that visit's folder."""
-    try:
-        return write_level(body.live_id, body.folder, body.level, body.completed, body.duration_s,
-                           body.score, body.stars, body.source, body.trials, body.rows, motion=body.motion)
-    except RecordingError as error:
-        raise _recording_error(error) from error
-
-
-@router.post("/lobby/record/end", status_code=204)
-def lobby_record_end(body: RecordEnd):
-    try:
-        end_session(body.live_id, body.folder)
-    except RecordingError as error:
-        raise _recording_error(error) from error
-

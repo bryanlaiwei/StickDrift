@@ -45,7 +45,7 @@ The games move an in-game hand with the stick (velocity control), so distance fr
 
 In Chrome or Edge, **Enable motion sensors** in the lobby opens the DualSense over WebHID (`web/lobby/motion.js`) and adds its gyroscope and accelerometer to the recording. Without it the games still work from the Gamepad API alone.
 
-Each finished game is also written to `data/ultimate_data/<timestamp>_lobby/` (`backend/app/lobby_record.py`), the folder the pattern model trains on.
+Visits are stored only in Tiger Data. The API writes no recording files; the pattern model trains from local recordings (see [Training the pattern model](#training-the-pattern-model)).
 
 ### 🌙 Mabel's Moonflower Garden (desktop game)
 
@@ -80,17 +80,17 @@ Potential concerns come from fixed rules (latest result vs that resident's own u
 
 ### 🧠 Pattern model (`tcn/`)
 
-A temporal convolutional network (PyTorch) that scores each visit 0–100 for resemblance to three movement patterns:
+A temporal convolutional network (PyTorch) that scores each visit 0–100 for resemblance to three movement patterns. Caregivers only ever see the neutral label; the internal keys are condition names because of how the training folders are named.
 
-- 🧓 **Parkinson's:** slowed, smaller movements in both hands;
-- ✋ **Stroke:** one hand clearly weaker or slower than the other;
-- 〰️ **Essential tremor:** rhythmic shake while the hand moves.
+- 🧓 **Slower, smaller movements in both hands** (key `parkinson`);
+- ✋ **One hand weaker or slower than the other** (key `stroke`);
+- 〰️ **Rhythmic shake while moving** (key `essential_tremor`).
 
 One shared network reads short stretches of each hand's movement and gives two outputs per hand: tremor and impairment. Parkinson's is the impairment both hands share, stroke is the gap between the hands, and essential tremor is the higher tremor score of the two hands.
 
 When a lobby visit ends, `visit/report.py` scores Apple Picking and Harbour Fishing with the model. Parkinson's and essential tremor are averaged across the two games; stroke comes from Apple Picking, the only game where both hands move together. **Rat Catching is not scored by the model.** Its correctness (target rats caught, misses, wrong slams) and reaction time are counted directly from the game's events. Garden visits are scored by `backend/scripts/score_garden.py`.
 
-The model is trained locally by the team, on a laptop, from the lobby visits we played and recorded (plus synthetic data), and saved as `runs/tcn/model.pt`. That file is committed to the repo, and the backend loads it from disk each time it scores a visit, including at demo time. Nothing is trained or downloaded while the app runs. It was not trained on patients. The labels are the model's own output names; each score is resemblance to that pattern, never a diagnosis or a disease probability. The assistant and report may use these three names only in that sense and refuse any other condition name. The model no longer scores diabetes or ataxia, and the loader skips the old recordings for those patterns.
+The model is trained locally by the team, on a laptop, from the lobby visits we played and recorded (plus synthetic data), and saved as `runs/tcn/model.pt`. That file is committed to the repo, and the backend loads it from disk each time it scores a visit, including at demo time. Nothing is trained or downloaded while the app runs. It was not trained on patients. Each score is resemblance to a movement pattern, never a diagnosis or a disease probability. The assistant and report refuse every condition name. The model no longer scores diabetes or ataxia, and the loader skips the old recordings for those patterns.
 
 ## 🚀 Running locally
 
@@ -112,7 +112,7 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python -m scripts.seed_synthetic   # optional: two demo residents with SYNTHETIC history
-python seed_accounts.py            # optional: logins for existing residents + a caregiver account
+python seed_accounts.py            # optional: logins for existing residents + a caregiver account (random passwords, printed once)
 uvicorn app.main:app --port 8000
 ```
 
@@ -226,7 +226,7 @@ backend/
   app/views.py, insights.py  Caregiver resident data, concerns and recommended checks
   app/assistant.py           Gemini assistant with grounding and wording checks
   app/report.py              Clinician PDF report
-  app/lobby_record.py        Writes finished lobby games to data/ultimate_data for training
+  app/gemini.py              The Gemini client shared by the assistant and the report
   scripts/                   Synthetic demo data, garden import, garden scoring
   seed_accounts.py           Demo logins
 tcn/                         Pattern model: data preparation, network, training, scoring
@@ -234,7 +234,7 @@ runs/tcn/model.pt            Trained pattern-model checkpoint
 visit/report.py              Scores a finished lobby visit (pattern model + Rat Catching counts)
 hand_replay/                 Reconstructed hands + controller GIFs from recordings and from a finished lobby visit
 study/                       Tools for the Noy et al. (2025) mirror-game tracking dataset
-tests/                       Python and Node tests (visit report, lobby recording, measurements, rat timing)
+tests/                       Python and Node tests (visit report, insights, live hand replay, measurements, rat timing)
 cloudflare/, wrangler.jsonc  Cloudflare Worker that serves the site and proxies /api
 Controller Data - Zain/      DualSense reader and the pygame garden game
 blender_hub/                 Blender version of the lobby
@@ -259,10 +259,9 @@ All caregiver routes need a caregiver login; `/me/*` routes need a resident logi
 | WS | `/caregiver/live/{id}/ws` | Push stream of one live session |
 | POST | `/caregiver/assistant` | Ask the assistant about all residents or one |
 | GET | `/caregiver/residents/{id}/report.pdf` | Clinician PDF report (`?tz=` prints times in the reader's zone) |
-| POST | `/lobby/record/start`, `/lobby/record/level`, `/lobby/record/end` | Save finished lobby games as training recordings |
 | GET | `/health` | Database reachable |
 
-`main.py` also keeps a lower-level `/participants` and `/sessions/{id}/…` API for recording sessions sample by sample, and `/garden/recordings` and `/sessions/{id}/garden-timeline` for imported garden data.
+`main.py` also serves `/garden/recordings` and `/sessions/{id}/garden-timeline` (caregivers only) for imported garden data. Live sessions are kept in Tiger Data, so the API can run with more than one worker and a restart doesn't drop a visit in progress.
 
 ## ⚠️ Limitations
 

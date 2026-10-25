@@ -154,11 +154,9 @@ class VisitReportTest(unittest.TestCase):
         self.assertEqual(scores["essential_tremor"], 10.0)
         self.assertEqual(set(scores), {"parkinson", "stroke", "essential_tremor"})
         self.assertEqual(set(report["model"]["by_game"]), {"apple", "fish"})
-        live = report["live"]["hands"]["left"]
-        self.assertIn("reach_s", live)
-        self.assertIn("tracking_error", live)
+        self.assertNotIn("live", report)  # the per-hand numbers live once, in the visit's live measurements
 
-    def test_chart_reach_comes_from_the_grab(self):
+    def test_reach_comes_from_the_grab(self):
         report = finish_visit({
             "apple": {"frames": _apple_frames(), "events": [
                 {"type": "trial", "t": 2.0, "trial": 1, "hand": "left",
@@ -166,8 +164,9 @@ class VisitReportTest(unittest.TestCase):
                 {"type": "basket", "hand": "left", "t": 3.2},
             ]},
         }, score=_score)
-        self.assertEqual(report["live"]["hands"]["left"]["reach_s"], 1.0)
-        self.assertEqual(report["live"]["hands"]["left"]["reaction_s"], 0.4)
+        left = report["games"]["apple"]["per_hand"]["left"]
+        self.assertEqual(left["median_reach_s"], 1.0)
+        self.assertEqual(left["median_reaction_s"], 0.4)
 
     def test_missing_checkpoint_still_returns_the_counts(self):
         report = finish_visit({
@@ -217,6 +216,64 @@ class VisitReportTest(unittest.TestCase):
         self.assertEqual(report["games"]["rat"]["score"], 0)
         self.assertNotIn("frames", out.stdout)
 
+
+
+class SharedMeasurementsTest(unittest.TestCase):
+    """The live view and the end-of-visit report measure shake and tracking with the same code."""
+
+    def fish_frames(self):
+        frames = []
+        for i in range(120):
+            wobble = 0.02 if i % 2 else -0.02
+            frames.append({
+                "t": i / 60, "phase": "track", "trial": 1,
+                "lx": 0.3 + wobble, "ly": 0.1, "rx": 0.0, "ry": 0.0,
+                "cursor_lx": 0.3 + wobble, "cursor_ly": 0.1, "cursor_rx": None, "cursor_ry": None,
+                "target_lx": 0.25, "target_ly": 0.1, "target_rx": None, "target_ry": None,
+                "on_l": 1 if i % 3 else 0, "on_r": 0,
+            })
+        return frames
+
+    def test_fish_shake_and_tracking_match_the_live_numbers(self):
+        from backend.app.live_metrics import SessionMetrics, game_summary
+
+        frames = self.fish_frames()
+        report = finish_visit({"fish": {"frames": frames, "events": [
+            {"type": "trace", "round": 1, "hand": "left", "time_s": 2.0, "on_lane_pct": 66.7, "score": 10},
+        ]}}, score=_score)
+        report_left = report["games"]["fish"]["per_hand"]["left"]
+
+        live = SessionMetrics()
+        live.start_level("fish")
+        keys = ("t", "trial", "phase", "lx", "ly", "rx", "ry", "target_lx", "target_ly", "target_rx", "target_ry",
+                "on_l", "on_r", "cursor_lx", "cursor_ly", "cursor_rx", "cursor_ry")
+        for frame in frames:
+            live.add([frame[k] for k in keys])
+        live_left = game_summary(live.summary(), "fish")["hands"]["left"]
+
+        self.assertIsNotNone(live_left["shake"])
+        self.assertEqual(report_left["shake"], live_left["shake"])
+        self.assertEqual(report_left["mean_lag"], live_left["tracking_error"])
+
+    def test_state_round_trip_keeps_measuring_the_same(self):
+        import json
+
+        from backend.app.live_metrics import SessionMetrics
+
+        frames = self.fish_frames()
+        keys = ("t", "trial", "phase", "lx", "ly", "rx", "ry", "target_lx", "target_ly", "target_rx", "target_ry",
+                "on_l", "on_r", "cursor_lx", "cursor_ly", "cursor_rx", "cursor_ry")
+        whole, split = SessionMetrics(), SessionMetrics()
+        whole.start_level("fish")
+        split.start_level("fish")
+        for frame in frames:
+            whole.add([frame[k] for k in keys])
+        for frame in frames[:50]:
+            split.add([frame[k] for k in keys])
+        split = SessionMetrics.from_state(json.loads(json.dumps(split.to_state())))
+        for frame in frames[50:]:
+            split.add([frame[k] for k in keys])
+        self.assertEqual(split.summary(), whole.summary())
 
 if __name__ == "__main__":
     unittest.main()

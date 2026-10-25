@@ -11,7 +11,6 @@ import { FishGame } from './fish.js'
 import { RatGame } from './rat.js'
 import { LiveStream } from './live.js'
 import { Measure } from './measure.js'
-import { Recorder } from './record.js'
 import { motion } from './motion.js'
 
 const canvas = document.getElementById('c')
@@ -32,7 +31,6 @@ let hub, games
 let active = null // the running game, or null while in the lobby
 const live = new LiveStream()
 const measure = new Measure()
-const record = new Recorder()
 let scoreList = []
 let activeName = null
 
@@ -46,10 +44,6 @@ function resize() {
 /** The high-score panel shown in the lobby. */
 function refreshScores() {
   scoreList = PORTALS.map((p) => ({ title: p.title, ...bestFor(p.game) }))
-}
-
-function levelDone(game) {
-  return !!game && (game.phase === 'done' || game.state === 'done')
 }
 
 /** The exit door: end the live session, say goodbye, and go back to the dashboard. */
@@ -71,18 +65,10 @@ function startGame(portal) {
   active = games[portal.game]
   activeName = portal.game
   active.start()
-  record.begin(portal.game)
   live.enter(portal.game)
   measure.enter(portal.game)
 }
 function leaveGame() {
-  const game = active
-  const done = levelDone(game)
-  record.end({
-    completed: done,
-    score: game && game.points ? game.points() : null,
-    stars: game && game.stars ? game.stars() : null,
-  })
   active = null
   activeName = null
   sfx.back()
@@ -130,12 +116,8 @@ function frame() {
     renderer.render(hub.scene, hub.camera) // keep the last frame under the goodbye screen
     return
   }
-  const sample = measure.frame(active, live.now(), pad.raw, (e) => {
-    live.event(e.type, e)
-    record.trial(e)
-  })
+  const sample = measure.frame(active, live.now(), pad.raw, (e) => live.event(e.type, e))
   live.sample(sample, motion.latest())
-  if (activeName) record.sample(sample, pad, motion.latest())
   let ui
   if (active) {
     if (active.update(dt, pad)) leaveGame()
@@ -178,16 +160,12 @@ async function init() {
   for (const v of [hub, ...Object.values(games)]) renderer.compile(v.scene, v.camera)
   refreshScores()
   // handy for debugging / automated checks
-  window.__lobby = { hub, games, input, live, record, motion, audio, get active() { return active }, startGame, leaveGame, renderer, renderUi }
+  window.__lobby = { hub, games, input, live, motion, audio, get active() { return active }, startGame, leaveGame, renderer, renderUi }
   // no start screen: begin straight away. Audio starts suspended and is unlocked by the first click / key / button press.
   audio.autoStart()
   audio.setTrack('lobby')
   running = true
   clock.getDelta()
-  window.addEventListener('pagehide', () => {
-    if (activeName) record.end({ completed: levelDone(active), score: active.points?.(), stars: active.stars?.() }, true)
-    record.finish(true)
-  })
 }
 
 init()

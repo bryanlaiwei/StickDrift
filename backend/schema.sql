@@ -207,9 +207,9 @@ CREATE TABLE IF NOT EXISTS session_events (
 CREATE INDEX IF NOT EXISTS session_events_session_idx
     ON session_events (session_id, t_ms);
 
--- Live garden sessions, shared through TigerData so a caregiver on any computer
--- can watch a resident playing on another. The API that launched the game writes
--- these; every API reads them. Rows are short-lived and pruned after a day.
+-- Live sessions (web lobby and garden game), shared through TigerData so a caregiver
+-- on any computer can watch a resident playing on another. Any API process reads and
+-- writes them. Rows are short-lived and pruned after a day.
 CREATE TABLE IF NOT EXISTS live_sessions (
     live_id UUID PRIMARY KEY,
     participant_id UUID NOT NULL REFERENCES participants (participant_id) ON DELETE CASCADE,
@@ -250,6 +250,32 @@ ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS cur_lx REAL;
 ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS cur_ly REAL;
 ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS cur_rx REAL;
 ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS cur_ry REAL;
+
+-- Sessions live here, not in one API process's memory, so any API process can serve any
+-- request and a restart loses nothing. The API also applies this block at startup (live.SCHEMA_SQL).
+-- kind: 'lobby' or 'garden'. token_hash: SHA-256 of the session's ingest token.
+-- running: the running measurements (live_metrics.SessionMetrics.to_state()).
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'garden';
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS token_hash TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS keyboard BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS folder TEXT;
+ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS running JSONB;
+CREATE UNIQUE INDEX IF NOT EXISTS live_sessions_token_idx ON live_sessions (token_hash);
+-- DualSense motion, when the lobby reads it over WebHID (blank, not zero, when it doesn't).
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS gyro_x REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS gyro_y REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS gyro_z REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS acc_x REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS acc_y REAL;
+ALTER TABLE live_samples ADD COLUMN IF NOT EXISTS acc_z REAL;
+-- The in-game events a lobby visit's report needs (apple picked, trace finished, rat slammed).
+CREATE TABLE IF NOT EXISTS live_events (
+    id BIGSERIAL PRIMARY KEY,
+    live_id UUID NOT NULL REFERENCES live_sessions (live_id) ON DELETE CASCADE,
+    level TEXT NOT NULL,
+    event JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS live_events_live_idx ON live_events (live_id, id);
 
 -- One reconstructed-hands GIF per lobby visit (hand_replay/), drawn when the visit ends.
 -- The API also creates this table before its first insert (app/hand_replays.py).

@@ -1,10 +1,10 @@
 # Stick Drift — project context and scope guardrails
 
-> Living document for the Hack the Valley 11 team and any coding or research agents helping us. Last updated: 2026-10-17 (America/Toronto). Change decisions in the log at the bottom rather than silently changing the mission.
+> Living document for the Hack the Valley 11 team and any coding or research agents helping us. Last updated: 2026-10-25 (America/Toronto). Change decisions in the log at the bottom rather than silently changing the mission.
 >
 > **Read §0 first** for what is actually built. Sections 1–13 are the plan and the guardrails. `README.md` has setup steps, the API and the project layout.
 
-## 0. Current build state (2026-10-17)
+## 0. Current build state (2026-10-25)
 
 **The product pivoted from the planned arrow assessment (`assess-v1`) to games.** Residents play a **web 3D lobby** with three games (Apple Picking, Harbour Fishing, Rat Catching) in the browser with a PS5 controller. Caregivers on any computer watch live and review each resident's visits. The arrow game was built briefly in the browser, then removed (§13). The pygame **Mabel's Moonflower Garden** remains as a desktop game whose recordings train the pattern model.
 
@@ -18,18 +18,17 @@
 | Resident home | **Built.** One button opens the web lobby in a new tab. Residents see no scores or history. | `web/src/pages/Home.tsx` |
 | Web 3D lobby + games (`lobby-v1`) | **Built by a teammate; played with real controllers.** three.js lobby, three games, scores/stars for the resident, synthesised sound. | `web/lobby/`, `web/lobby.html` |
 | Lobby measurement | **Built.** `measure.js` reads each game's state (read-only) and sends in-game hand and target positions with every sample, plus one result per attempt (apple picked, rat slammed). Server turns these into per-hand reach, tracking and shake measurements. | `web/lobby/measure.js`, `backend/app/live_metrics.py` |
-| Live view across laptops | **Built and tested across two APIs.** Lobby → resident's API → Tiger Data `live_sessions`/`live_samples` + Postgres `NOTIFY`; caregiver's API `LISTEN`s and pushes over a WebSocket; the page plays samples back through a 150 ms buffer. ~0.1 s stick-to-screen. Falls back to server-side reads (0.15 s) if no notifications arrive, and to polling if the WebSocket can't connect. | `backend/app/live.py`, `backend/app/live_stream.py`, `web/src/components/useLiveFeed.ts`, `web/src/pages/LiveSession.tsx` |
+| Live view across laptops | **Built and tested across two APIs.** Lobby → resident's API → Tiger Data `live_sessions`/`live_samples` + Postgres `NOTIFY`; caregiver's API `LISTEN`s and pushes over a WebSocket; the page plays samples back through a 150 ms buffer. ~0.1 s stick-to-screen. Falls back to server-side reads (0.15 s) if no notifications arrive, and to polling if the WebSocket can't connect. A session's state, token hash, running measurements and in-game events live in Tiger Data (`live_sessions`, `live_samples`, `live_events`), so any API process can serve any request and restarting the API doesn't drop a visit in progress. | `backend/app/live.py`, `backend/app/live_stream.py`, `web/src/components/useLiveFeed.ts`, `web/src/pages/LiveSession.tsx` |
 | Lobby history | **Built.** Each finished visit becomes a `lobby-v1` session with per-game, per-hand results; only in-game samples (no lobby walking, menus or countdowns) are copied to `raw_samples`, tagged by game. Unsaved visits are swept on caregiver views and before the live buffer is pruned. Earlier visits from 2026-10-17 were backfilled. | `backend/app/live.py` (`save_lobby`) |
 | Caregiver dashboard | **Built.** Residents with risk badges, who is playing now, recently finished visits; the AI assistant and the teammate's garden-recordings panel sit in collapsible tools. | `web/src/pages/CaregiverDashboard.tsx` |
 | Resident page | **Built.** Overview (status banner, potential concerns with evidence, recommended checks, possible reasons, research basis), Trends (per-game lines per hand across visits; garden and earlier sessions when present), Game visits, Garden visits, Ask the assistant. | `web/src/pages/ResidentDetail.tsx` |
-| Rule-based insights | **Built for the older session summaries only** (latest vs median of earlier sessions; needs 4 usable sessions). Lobby visits are shown visit by visit and do not set a baseline yet. | `backend/app/insights.py` |
+| Rule-based insights | **Built.** Lobby game visits are the personal baseline: the latest 1–2 controller visits against the median of earlier ones, per game and hand (reaction time, time to reach, distance from the lane, time on the lane); needs 4 visits, keyboard visits left out. Demo residents' older session summaries stand in when there are too few visits. | `backend/app/insights.py` |
 | AI assistant | **Built.** Gemini (`gemini-3.8-flash` with fallbacks) answers from structured facts only; numbers not in the facts are flagged, disease names trigger a clinician referral, and a rule-based answer is used when Gemini is unavailable. | `backend/app/assistant.py` |
-| Pattern model (TCN) | **Built by a teammate; no trained checkpoint committed.** Scores garden and lobby recordings 0–100 for resemblance to three patterns, keyed `parkinson`, `stroke`, `essential_tremor`. Diabetes and ataxia were dropped from the model (2026-10-18). The UI and assistant show the model's own pattern names (§4.1). Concerns at ≥ 50 ("keep an eye on") and ≥ 70 ("check soon"); these thresholds are untested choices. | `tcn/`, `backend/scripts/score_garden.py` |
+| Pattern model (TCN) | **Built by a teammate; checkpoint committed (`runs/tcn/model.pt`).** Scores garden and lobby recordings 0–100 for resemblance to three patterns, keyed `parkinson`, `stroke`, `essential_tremor`. Caregivers and the assistant see only neutral movement labels (§4.1). One visit ≥ 50 is "keep an eye on"; "check soon" needs the two latest judged visits ≥ 70. These thresholds are untested choices. No held-out evaluation is recorded. | `tcn/`, `backend/scripts/score_garden.py` |
 | Mabel's Moonflower Garden (`garden-v3`) | **Implemented and played with real controllers.** Four chapters, full-rate HID CSV per level, imported into Tiger Data. The API can still launch it (`/me/garden/launch`, with live streaming and model judging at the end), but the site no longer links to it. | `Controller Data - Zain/Games/` |
 | Blender lobby | **Built by a teammate (Windows only).** Design reference; sends no data. | `blender_hub/` |
 | Synthetic demo data | **Built.** Demo Resident A/B with 7 labelled-synthetic arrow-style sessions each, shown as "Earlier sessions". | `backend/scripts/seed_synthetic.py` |
 | Review-card workflow (acknowledge / needs assessment / dismiss with note) | **Not built.** Concerns are shown but staff can't record an outcome yet. | — |
-| Lobby baseline and lobby-based concerns; pattern model for lobby games | **Not built.** Needs repeat visits per resident and lobby training data (now being collected in `raw_samples`). | — |
 
 **Run it:** see `README.md` → *Running locally*. Each laptop needs `backend/.env` with the Tiger Data connection string (copy `backend/.env.example`). Never commit `.env`. After pulling, restart both the API and the web dev server.
 
@@ -70,7 +69,7 @@ Hack the Valley's judging also emphasizes technical quality, design, impact, pre
 2. A change may be caused by fatigue, sleep, medications, vision, instructions, unfamiliarity with games, device placement, or a faulty controller. The interface shows context and confidence/quality rather than hiding uncertainty.
 3. Preserve comparability: every session stores a protocol version (`lobby-v1`, `garden-v3`), and a change to a game's targets, timing, speed or scoring rules that affects movement needs a new version and its own history. Teammates are actively tuning the lobby games (for example rat speed, number of fishing rounds), so compare visits across such changes with care. Do not automatically increase difficulty and then compare raw results.
 4. Do not use childlike visuals or a competitive leaderboard for the older-adult pitch. Make the experience age-respectful: large targets, high contrast, adjustable sound, clear instructions, no penalty or shame for missing, an easy way to leave a game. The lobby's per-player scores and stars are personal bests, not a leaderboard, and residents never see their health measurements.
-5. No hidden camera or biometric collection is required. Start with stick data only. The DualSense also reports gyro, accelerometer and touchpad data: **do not use them in v1 metrics, and never present motion data as tremor detection.** Use synthetic, clearly labeled data for any multi-day change we cannot actually observe during the hackathon.
+5. No hidden camera or biometric collection is required. The DualSense also reports gyro, accelerometer and touchpad data. **Motion data may feed the pattern model, and its output is shown only as resemblance to a movement pattern; never present motion data as tremor detection.** Use synthetic, clearly labeled data for any multi-day change we cannot actually observe during the hackathon.
 6. A sudden new neurological symptom in real life warrants ordinary urgent clinical procedures; no one should wait for the game or an AI score.
 
 ## 5. Game and measurement protocol
@@ -105,7 +104,7 @@ Position-controlled (stick position is the cursor), fixed course, four chapters:
 
 **A baseline is the person's own stable reference under a fixed protocol, not a population-wide “healthy” score.**
 
-*Status (2026-10-17):* these principles are implemented only for the older session summaries (`insights.py`). Lobby visits are shown one by one and as trends; a lobby baseline should follow these rules once residents have repeat visits under an unchanged `lobby-v1`.
+*Status (2026-10-25):* implemented for lobby visits (`insights.analyze_lobby`): median of earlier controller visits as the reference, the latest one or two visits compared against it, needs 4 visits. Robust spread, quality gates and resets are not built yet.
 
 1. **Hardware/calibration baseline:** With both sticks untouched, gather 1–2 seconds of readings per axis for centers and neutral jitter. Move each axis slowly in both directions to find comfortable, observed ranges; store controller-specific calibration. Recheck each session. If the center or range shifts substantially, re-calibrate and mark the session as potentially noncomparable.
 2. **Practice effect:** Run unscored practice first. If the person is still learning the controls, record “baseline pending.” Avoid treating the first game ever as a stable reference.
@@ -156,14 +155,13 @@ FastAPI ──INSERT + NOTIFY──► Tiger Data ◄──LISTEN / reads── 
 
 Per-attempt and per-hand measurements (`live_metrics.py`), and for the older session summaries a comparison of the latest session with the median of earlier ones (`insights.py`: latency rise ≥ 150 ms, accuracy drop ≥ 15%, at least 4 usable sessions). This is the **control** any trained model must beat, and the source of every number shown to staff.
 
-### Layer B — TCN pattern model (built by a teammate; untrained in the repo)
+### Layer B — TCN pattern model (built by a teammate)
 
-A temporal convolutional network (`tcn/`) scores each hand's movement stretches in garden recordings and fuses them into five 0–100 pattern-resemblance scores. It is trained on **teammate-simulated** recordings (folders such as "Parkinsons Data", "Left Weak") and **synthetic** recordings (`tcn/synthetic.py`); there is no clinical data. This goes beyond the original "no disease classifier" plan, so the guardrails are strict:
+A temporal convolutional network (`tcn/`) scores each hand's movement stretches in garden recordings and fuses them into three 0–100 pattern-resemblance scores. It is trained on **teammate-simulated** recordings (folders such as "Parkinsons Data", "Left Weak") and **synthetic** recordings (`tcn/synthetic.py`); there is no clinical data. This goes beyond the original "no disease classifier" plan, so the guardrails are strict:
 
 - Scores are described everywhere as *resemblance to a movement pattern*, never a probability of disease.
-- Caregivers see the model's own pattern names (Parkinson's, Stroke, Essential tremor) as 0-100 resemblance, each with a plain description (`PATTERN_HINTS`). The assistant and report may use these three names only as resemblance; any other condition name, including diabetes and ataxia, is refused.
-- No checkpoint is committed (`runs/tcn/model.pt` is ignored), so garden visits are saved without a judgement until someone trains one.
-- The model does not apply to lobby games: they are velocity-controlled and move differently. A lobby model needs its own training data, which `raw_samples` (in-game only, tagged by game) now collects.
+- Caregivers and the assistant see neutral movement labels only ("Slower, smaller movements in both hands", "One hand weaker or slower than the other", "Rhythmic shake while moving"; `insights.PATTERN_LABELS`). The assistant and report refuse every condition name, including the ones the training folders are named after.
+- The checkpoint is committed (`runs/tcn/model.pt`) and scores Apple Picking and Harbour Fishing at the end of each lobby visit. It is trained from local recordings; the API does not write training files.
 
 ### Layer C — language assistance for the care team (built)
 
@@ -189,15 +187,15 @@ The schema in `backend/schema.sql` implements these contracts. Change the schema
 | --- | --- | --- | --- |
 | P0 | Controller + stable data stream | Both sticks map to four live normalized axes; disconnects visible. | Done in the browser lobby and the garden game; tested with real controllers. |
 | P0 | Games residents enjoy | Accessible, age-respectful games with clear instructions and an easy exit. | Lobby with three games built; garden game built. Older-adult playtesting not done. |
-| P0 | Baseline and trends | Transparent personal comparison, quality labels, clearly marked simulated data. | Trends across visits built; rule-based baseline only for older session summaries; lobby baseline not built. |
+| P0 | Baseline and trends | Transparent personal comparison, quality labels, clearly marked simulated data. | Trends across visits built; rule-based baseline on lobby visits built. |
 | P0 | Care-team view | Clear potential concerns with raw evidence and context; live view. | Dashboard, live view, resident page and concerns built; acknowledgement workflow not built. |
-| P1 | Useful AI | Grounded assistant and/or model **with** rule-based comparison and stated limits. | Assistant built with checks; pattern model built, no committed checkpoint, no held-out evaluation yet. |
+| P1 | Useful AI | Grounded assistant and/or model **with** rule-based comparison and stated limits. | Assistant built with checks; pattern model built and committed, no held-out evaluation yet. |
 | P1 | Evaluation + pitch | Record real gameplay, inspect timing, show data provenance, rehearse the demo. | Real cross-laptop sessions recorded; formal evaluation not done. |
 | P2 | Extra themes, haptics, future integration | Only after P0 works. No camera/YOLO, IMU "tremor" metrics, multi-sensor sprawl, or rushed EHR integration. | — |
 
-**Next steps, in order:** acknowledgement workflow on concerns → lobby baseline and lobby-based concerns once residents have repeat visits → train and evaluate the pattern model on garden data, then a lobby model on `raw_samples` → older-adult playtesting. When the controller fails, play with the keyboard; those visits are labelled and the care-team loop still works.
+**Next steps, in order:** acknowledgement workflow on concerns → held-out evaluation of the pattern model → older-adult playtesting. When the controller fails, play with the keyboard; those visits are labelled and the care-team loop still works.
 
-**Scope-drift test for agents:** Before adding a feature, ask: (1) Does it improve resident engagement **without corrupting comparability**? (2) Does it improve a **measured change** or its quality? (3) Does it help a **care team** act on a reviewable observation? (4) Can it be shown working during the 36-hour demo? If none apply, defer it. If it makes a disease claim, changes a game's measured task without a new protocol version, uses IMU data as a health signal, or targets children as the main PointClickCare story, stop and return to this document.
+**Scope-drift test for agents:** Before adding a feature, ask: (1) Does it improve resident engagement **without corrupting comparability**? (2) Does it improve a **measured change** or its quality? (3) Does it help a **care team** act on a reviewable observation? (4) Can it be shown working during the 36-hour demo? If none apply, defer it. If it makes a disease claim, changes a game's measured task without a new protocol version, presents motion data as tremor detection, or targets children as the main PointClickCare story, stop and return to this document.
 
 ## 11. Open decisions for the team
 
@@ -243,5 +241,9 @@ These sources inform the direction; none validate *this joystick protocol*.
 | 2026-10-17 | Measure lobby games from their state with a read-only observer (`measure.js`), using the in-game hand for distance and the stick for speed and shake. | The games are velocity-controlled; teammates' game files stay untouched. |
 | 2026-10-17 | Save every lobby visit to history, but copy only in-game samples to `raw_samples`, tagged by game. | Caregivers need history; lobby walking and menus would pollute training data. |
 | 2026-10-17 | The pattern model now has five patterns; show only neutral movement labels and keep model scores out of any diagnostic wording. | Its keys are condition names from training folders; the product must still never name a disease. |
+| 2026-10-25 | **Neutral labels are the policy.** The code had drifted to showing "Model pattern: Parkinson's / Stroke"; caregivers, the assistant and the report now see only neutral movement labels, and every condition name is refused. | Restores §4.1. |
+| 2026-10-25 | **Motion data (gyro/accelerometer) may feed the pattern model.** Supersedes the 2026-10-16 exclusion. | The model already reads it; its output stays pattern resemblance, never tremor detection. |
+| 2026-10-25 | Live sessions live in Tiger Data instead of the API's memory; the API no longer writes lobby CSVs to disk. | Restarts and more than one worker no longer drop visits; one copy of each visit, linked to the resident. Training reads local recordings. |
+| 2026-10-25 | Lobby visits set the personal baseline; "check soon" from the pattern model needs two judged visits in a row. | One noisy visit should not raise the strongest prompt. |
 
 **Editing rule:** When changing this document, update §0, the protocol version/assumptions, this decision log, and the demo claims together. Preserve the mission and evidence boundaries unless the team explicitly decides to pivot.

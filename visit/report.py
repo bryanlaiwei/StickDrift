@@ -4,12 +4,19 @@ Call `finish_visit` with the in-memory frames and the short event list from
 Apple Picking, Harbour Fishing, and Rat Catching. Apple and Fishing are scored
 by the pattern model. Rat Catching is counted from what the player did. The
 returned document is what gets stored. The frames are not part of it.
+
+Shake, tracking error and the per-hand reach numbers come from
+backend/app/live_metrics.py, the same code that measures the visit live, so
+both places agree. This file only adds what the live view can't measure
+(carry time, path length, overshoot, per-trace and rat details).
 """
 
 import json
 import math
 import sys
 from pathlib import Path
+
+from backend.app.live_metrics import combine_tracks, hand_summary, shake, track
 
 SCHEMA_VERSION = 1
 MEANING = "0-100 pattern resemblance, not a disease probability"
@@ -63,7 +70,6 @@ def finish_visit(capture, score=None, checkpoint=None):
         "games": games,
         "model": model,
         "dashboard": _dashboard(fused, by_game, games.get("rat")),
-        "live": _chart(games.get("apple"), games.get("fish")),
     }
 
 
@@ -161,18 +167,19 @@ def _apple(frames, events):
     grabs = {hand: sum(1 for trial in trials if trial["hand"] == hand and trial["reached"]) for hand in HANDS}
     per_hand = {}
     for hand in HANDS:
-        mine = [attempt for attempt in attempts if attempt["hand"] == hand and attempt["reached"]]
-        speeds = [attempt["peak_speed"] for attempt in mine]
+        mine = [attempt for attempt in attempts if attempt["hand"] == hand]
+        reached = [attempt for attempt in mine if attempt["reached"]]
+        shared = hand_summary(hand, [{hand: attempt} for attempt in mine], [])
         per_hand[hand] = {
-            "median_reaction_s": _median(attempt["reaction_s"] for attempt in mine),
-            "median_reach_s": _median(attempt["reach_s"] for attempt in mine),
-            "median_carry_s": _median(attempt["carry_s"] for attempt in mine),
-            "median_peak_speed": _median(speeds),
-            "median_reach_size": _median(attempt["reach_size"] for attempt in mine),
-            "median_path_length": _median(attempt["path_length"] for attempt in mine),
-            "speed_change_pct": _speed_change(speeds),
+            "median_reaction_s": shared["reaction_s"],
+            "median_reach_s": shared["reach_s"],
+            "median_carry_s": _median(attempt["carry_s"] for attempt in reached),
+            "median_peak_speed": shared["peak_speed"],
+            "median_reach_size": shared["reach_size"],
+            "median_path_length": _median(attempt["path_length"] for attempt in reached),
+            "speed_change_pct": shared["speed_change_pct"],
             "idle_s": _idle(frames, hand),
-            "shake": _shake([_xy(frame, _STICK[hand]) for frame in frames]),
+            "shake": shake(_xy(frame, _STICK[hand]) for frame in frames),
         }
     return {
         "score": _int(result.get("score")),
@@ -226,14 +233,17 @@ def _fish(frames, events):
     per_hand = {}
     for hand in HANDS:
         mine = [trace for trace in traces if trace["hand"] == hand and trace["completed"]]
+        tracked = combine_tracks([trace["_track"] for trace in traces if trace["hand"] == hand and trace["_track"]])
         per_hand[hand] = {
             "traces": len(mine),
             "mean_time_s": _mean(trace["time_s"] for trace in mine),
             "mean_on_lane_pct": _mean(trace["on_lane_pct"] for trace in mine),
             "mean_off_count": _mean(trace["off_count"] for trace in mine),
-            "mean_lag": _mean(trace["lag"] for trace in traces if trace["hand"] == hand),
-            "shake": _mean(trace["shake"] for trace in traces if trace["hand"] == hand),
+            "mean_lag": tracked["tracking_error"],
+            "shake": tracked["shake"],
         }
+    for trace in traces:
+        trace.pop("_track", None)
     return {
         "score": _int(result.get("score")),
         "stars": _int(result.get("stars")),
@@ -325,30 +335,6 @@ def _rat(frames, events):
     }
 
 
-def _chart(apple, fish):
-    def hand(name):
-        apple_hand = (apple or {}).get("per_hand", {}).get(name, {})
-        fish_hand = (fish or {}).get("per_hand", {}).get(name, {})
-        basket = None if apple is None else apple["basket"][name]
-        expired = None if apple is None else apple["expired"][name]
-        undelivered = None if apple is None else apple["undelivered"][name]
-        on_lane = fish_hand.get("mean_on_lane_pct")
-        return {
-            "reaction_s": apple_hand.get("median_reaction_s"),
-            "reach_s": apple_hand.get("median_reach_s"),
-            "peak_speed": apple_hand.get("median_peak_speed"),
-            "reach_size": apple_hand.get("median_reach_size"),
-            "apples_reached": basket,
-            "apples_total": None if basket is None else basket + expired + undelivered,
-            "speed_change_pct": apple_hand.get("speed_change_pct"),
-            "tracking_error": fish_hand.get("mean_lag"),
-            "on_target": None if on_lane is None else round(on_lane / 100, 3),
-            "shake": fish_hand.get("shake") if fish_hand.get("shake") is not None else apple_hand.get("shake"),
-            "shake_hz": None,
-        }
-    return {"hands": {"left": hand("left"), "right": hand("right")}}
-
-
 def _frames(raw):
     frames = []
     for item in raw or []:
@@ -431,20 +417,15 @@ def _track_segments(frames):
 def _track_stats(group):
     hand = group["hand"]
     samples = group["samples"]
-    distances = []
     ons = []
     cursors = []
-    sticks = []
     times = []
     for frame in samples:
-        cursor = _xy(frame, _CURSOR[hand])
-        target = _xy(frame, _TARGET[hand])
-        cursors.append(cursor)
-        sticks.append(_xy(frame, _STICK[hand]))
+        cursors.append(_xy(frame, _CURSOR[hand]))
         times.append(float(frame["t"]))
         ons.append(int(frame.get(_ON[hand]) or 0))
-        if cursor is not None and target is not None:
-            distances.append(_dist(cursor, target))
+    tracked = track((float(frame["t"]), _xy(frame, _CURSOR[hand]), _xy(frame, _TARGET[hand]),
+                     _xy(frame, _STICK[hand]), int(frame.get(_ON[hand]) or 0)) for frame in samples)
     off_s, longest = _off_runs(times, ons)
     first = None
     for time, on in zip(times, ons):
@@ -457,20 +438,21 @@ def _track_stats(group):
         "trial": group["trial"],
         "time_s": None if len(times) < 2 else round(times[-1] - times[0], 3),
         "on_lane_pct": on_pct,
-        "lag": _mean(distances),
+        "lag": None if tracked is None else tracked["tracking_error"],
         "path_length": _path(cursors),
         "reversals": _reversals(cursors),
         "off_s": off_s,
         "longest_off_s": longest,
         "first_contact_s": first,
-        "shake": _shake(sticks),
+        "shake": None if tracked is None else tracked["shake"],
+        "_track": tracked,
     }
 
 
 def _empty_track():
     return {
         "lag": None, "path_length": None, "reversals": None, "off_s": None,
-        "longest_off_s": None, "first_contact_s": None, "shake": None,
+        "longest_off_s": None, "first_contact_s": None, "shake": None, "_track": None,
     }
 
 
@@ -613,18 +595,6 @@ def _gap(pairs):
     return out
 
 
-def _speed_change(speeds):
-    values = [speed for speed in speeds if speed]
-    if len(values) < 4:
-        return None
-    half = len(values) // 2
-    first = sum(values[:half]) / half
-    last = sum(values[-half:]) / half
-    if not first:
-        return None
-    return round((last - first) / first * 100, 1)
-
-
 def _idle(frames, hand):
     total = 0.0
     previous = None
@@ -637,21 +607,6 @@ def _idle(frames, hand):
             total += now[0] - previous[0]
         previous = now
     return round(total, 3)
-
-
-def _shake(points):
-    points = [point for point in points if point is not None]
-    if len(points) < 5:
-        return None
-    residuals = []
-    width = 5
-    for index in range(2, len(points) - 2):
-        window = points[index - 2:index + 3]
-        center = (sum(point[0] for point in window) / width, sum(point[1] for point in window) / width)
-        residuals.append(_dist(points[index], center))
-    if not residuals:
-        return None
-    return round(math.sqrt(sum(value * value for value in residuals) / len(residuals)), 4)
 
 
 def _path(points):
