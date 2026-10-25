@@ -85,6 +85,7 @@ export class AppleGame {
     this.phase = 'countdown'
     this.score = { red: 0, blue: 0 }
     this.wrong = 0
+    this.wrongBy = { red: 0, blue: 0 } // the glove that made each wrong touch
     this.rec = null
     this.lastCd = null
     this.pos = { red: [...HAND_START.red], blue: [...HAND_START.blue] }
@@ -207,6 +208,7 @@ export class AppleGame {
           if (this.t - a.wob > 0.7) { // wrong glove: the apple just shakes
             a.wob = this.t
             this.wrong++
+            this.wrongBy[c]++
             sfx.wrong()
           }
         }

@@ -10,6 +10,7 @@ measure.enter('apple')
 const apple = {
   phase: 'play',
   wrong: 0,
+  wrongBy: { red: 0, blue: 0 },
   score: { red: 0, blue: 0 },
   apples: [],
   carry: { red: null, blue: null },
@@ -19,6 +20,7 @@ const apple = {
 }
 measure.frame(apple, 1, [0, 0, 0, 0], emit)
 apple.wrong = 1
+apple.wrongBy.red = 1 // the red glove (left stick) touched a blue apple
 apple.apples.push({ color: 'blue', state: 'hang', wob: 5, x: 0, z: 4 })
 measure.frame(apple, 2, [0, 0, 0, 0], emit)
 apple.apples[0].state = 'gone'
@@ -28,7 +30,7 @@ apple.phase = 'done'
 measure.frame(apple, 4, [0, 0, 0, 0], emit)
 
 assert.deepEqual(events.map((event) => event.type), ['wrong', 'trial', 'expired', 'basket', 'result'])
-assert.equal(events[0].hand, 'right')
+assert.equal(events[0].hand, 'left')
 assert.equal(events[1].reached, false)
 assert.equal(events[2].hand, 'right')
 assert.equal(events[3].hand, 'left')

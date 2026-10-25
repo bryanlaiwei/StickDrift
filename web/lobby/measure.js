@@ -63,7 +63,7 @@ class AppleWatch {
   constructor() {
     this.open = { left: null, right: null }
     this.count = { left: 0, right: 0 }
-    this.prevWrong = 0
+    this.prevWrong = { red: 0, blue: 0 }
     this.prevScore = { red: 0, blue: 0 }
     this.seen = new Map()
     this.reported = false
@@ -122,12 +122,8 @@ class AppleWatch {
 
   /** Facts the stick samples cannot reconstruct: a wrong colour, a basket drop, an apple that fell away. */
   marks(g, t, emit) {
-    if (g.wrong > this.prevWrong) {
-      const hand = this.wrongHand(g)
-      for (let n = this.prevWrong; n < g.wrong; n++) emit({ type: 'wrong', hand, t })
-      this.prevWrong = g.wrong
-    }
     for (const [color, hand] of [['red', 'left'], ['blue', 'right']]) {
+      for (; this.prevWrong[color] < g.wrongBy[color]; this.prevWrong[color]++) emit({ type: 'wrong', hand, t })
       const gained = g.score[color] - this.prevScore[color]
       for (let n = 0; n < gained; n++) emit({ type: 'basket', hand, t })
       this.prevScore[color] = g.score[color]
@@ -141,19 +137,14 @@ class AppleWatch {
       this.seen.set(apple, apple.state)
     }
     for (const apple of this.seen.keys()) if (!alive.has(apple)) this.seen.delete(apple)
-    if (g.phase === 'done' && !this.reported) {
+    // like the game, wait for the last apples to land in the basket so the score is final
+    if (g.phase === 'done' && !this.reported && !g.apples.some((a) => a.state === 'fall')) {
       this.reported = true
       emit({
         type: 'result', t, score: g.points(), stars: g.stars(),
         red: g.score.red, blue: g.score.blue, wrong: g.wrong,
       })
     }
-  }
-
-  wrongHand(g) {
-    let best = null
-    for (const apple of g.apples) if (apple.wob != null && (best == null || apple.wob > best.wob)) best = apple
-    return best && best.color === 'blue' ? 'right' : 'left'
   }
 }
 
@@ -199,15 +190,42 @@ class FishWatch {
 }
 
 // ---- Rat Catching: flick a stick up as the target rat passes under the hand ------------------------
+/** One stick's upward pushes, followed all game, so each slam carries the timing of the flick that made it. */
+class Flick {
+  constructor() {
+    this.prev = null
+    this.speed = 0
+    this.onset = null // when the current push went past ONSET
+    this.peak = 0 // fastest the stick moved during the current push
+  }
+
+  update(t, up) {
+    if (this.prev) {
+      const dt = t - this.prev[0]
+      if (dt > 0) this.speed = 0.7 * this.speed + 0.3 * (Math.abs(up - this.prev[1]) / dt)
+      if (up > ONSET && this.prev[1] <= ONSET) {
+        this.onset = t
+        this.peak = 0
+      }
+    }
+    if (up > ONSET) this.peak = Math.max(this.peak, this.speed)
+    this.prev = [t, up]
+  }
+}
+
 class RatWatch {
   constructor() {
     this.reach = null
-    this.hand = null
+    this.first = null // the run's first slam, which its trial event describes
+    this.caught = false
     this.lastRun = null
     this.count = 0
     this.prev = { caught: 0, missed: 0, wrong: 0, empty: 0 }
-    this.flickSpeed = null
-    this.otherStick = false
+    this.flicks = { left: new Flick(), right: new Flick() }
+    this.lastSticks = null // the sticks on the frame before, which the game read when it flicked
+    this.hs = null
+    this.slam = null // the slam on its way down, until its outcome shows in the game's stats
+    this.runRound = null
     this.reported = false
     this.seenRats = 0
   }
@@ -221,19 +239,19 @@ class RatWatch {
       this.lastRun = runKey
       this.count++
       this.reach = { left: new Reach(t), right: new Reach(t) }
-      this.hand = null
     }
+    if (g.state === 'run') this.runRound = g.round + 1 // the game moves to the next round before a miss shows
+    // only upward pushes count; y is down, so up is -y
+    HANDS.forEach((h, i) => this.flicks[h].update(t, Math.max(0, -sticks[i][1])))
+    if (g.hs === 'down' && this.hs !== 'down') {
+      this.slam = this.startSlam(g, t, sticks)
+      if (this.reach && !this.first) this.first = this.slam
+    }
+    this.hs = g.hs
+    this.lastSticks = sticks
     if (this.reach) {
       out.trial = this.count
-      // only upward pushes count; y is down, so up is -y
       HANDS.forEach((h, i) => this.reach[h].update(t, [0, Math.min(0, sticks[i][1])], [0, -1]))
-      if (!this.hand && g.hs === 'down') { // the slam: credit the stick pushed up furthest
-        this.hand = -sticks[0][1] >= -sticks[1][1] ? 'left' : 'right'
-        this.slamAt = t
-        const other = this.hand === 'left' ? sticks[1] : sticks[0]
-        this.flickSpeed = this.reach[this.hand].peakSpeed
-        this.otherStick = mag(...other) > 0.25
-      }
       if (g.caughtThis) this.caught = true
       if (!runKey && g.hs !== 'down') this.finish(t, emit) // the rat is gone and the slam has landed
     }
@@ -247,25 +265,39 @@ class RatWatch {
     return out
   }
 
+  /** The game just started a slam: credit the stick pushed up furthest, with that flick's own timing. */
+  startSlam(g, t, sticks) {
+    const seen = this.lastSticks || sticks
+    const i = -seen[0][1] >= -seen[1][1] ? 0 : 1
+    const hand = HANDS[i], flick = this.flicks[hand]
+    const t0 = this.reach ? this.reach[hand].t0 : null // only a card rat on the run gives something to react to
+    return {
+      hand, t, round: g.round + 1,
+      reaction_s: t0 != null && flick.onset != null && flick.onset > t0 ? r3(flick.onset - t0) : null,
+      flick_speed: r3(flick.peak),
+      other_stick: mag(...seen[1 - i]) > 0.25,
+    }
+  }
+
   outcomes(g, t, emit) {
     const stats = g.stats
     for (const outcome of ['caught', 'wrong', 'empty']) {
       while (this.prev[outcome] < stats[outcome]) {
         this.prev[outcome]++
-        const hand = this.hand || 'right'
-        const reaction = this.reach && this.reach[hand]
+        const slam = this.slam || { hand: null, round: g.round + 1, reaction_s: null, flick_speed: null, other_stick: false }
+        this.slam = null
         emit({
-          type: 'slam', t, hand, outcome, round: g.round + 1,
-          reaction_s: reaction ? r3(reaction.onset) : null,
-          flick_speed: r3(this.flickSpeed),
+          type: 'slam', t, hand: slam.hand, outcome, round: slam.round,
+          reaction_s: slam.reaction_s,
+          flick_speed: slam.flick_speed,
           early: outcome === 'empty',
-          other_stick: this.otherStick,
+          other_stick: slam.other_stick,
         })
       }
     }
     while (this.prev.missed < stats.missed) {
       this.prev.missed++
-      emit({ type: 'miss', t, round: g.round + 1 })
+      emit({ type: 'miss', t, round: this.runRound ?? g.round + 1 })
     }
     if (g.state === 'done' && !this.reported) {
       this.reported = true
@@ -282,13 +314,14 @@ class RatWatch {
 
   finish(t, emit) {
     if (!this.reach) return
-    if (this.hand) {
-      const res = this.reach[this.hand].result(this.slamAt, !!this.caught)
-      res.reach_s = r3(this.slamAt - this.reach[this.hand].t0) // time to the slam, caught or not
-      emit({ type: 'trial', trial: this.count, hand: this.hand, ...res })
+    const slam = this.first
+    if (slam) {
+      const res = this.reach[slam.hand].result(slam.t, this.caught)
+      res.reach_s = r3(slam.t - this.reach[slam.hand].t0) // time to the slam, caught or not
+      emit({ type: 'trial', trial: this.count, hand: slam.hand, ...res })
     }
     this.reach = null
-    this.hand = null
+    this.first = null
     this.caught = false
   }
 }
