@@ -1,18 +1,16 @@
 [project]
 name = "stickdrift"
 version = "0.1.0"
-description = "Stick Drift games and DualSense input tools"
+description = "Stick Drift pattern model, visit report and hand replays"
 readme = "README.md"
 authors = [
     { name = "Zain Rizvi", email = "zain4rizvi@gmail.com" }
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "hidapi>=0.15.0",
     "matplotlib>=3.11.2",
     "numpy>=2.5.4",
     "pillow>=13.0.0",
-    "pygame-ce>=2.5.8",
     "scipy>=1.18.1",
     "torch>=2.14.1",
 ]

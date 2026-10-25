@@ -47,14 +47,6 @@ In Chrome or Edge, **Enable motion sensors** in the lobby opens the DualSense ov
 
 Visits are stored only in Tiger Data. The API writes no recording files; the pattern model trains from local recordings (see [Training the pattern model](#training-the-pattern-model)).
 
-### 🌙 Mabel's Moonflower Garden (desktop game)
-
-The original pygame game (`garden-v3`): four chapters of apple picking with both sticks, a left-stick and a right-stick butterfly flight, and watering with both sticks. It records every controller report (~500 Hz) to CSV, imports the recording into Tiger Data, and appears on the resident's page as **Garden visits**. The site no longer opens it, but it can still be run directly (see [Running the garden game](#running-the-garden-game)).
-
-### 🧊 Blender lobby
-
-`legacy/blender_lobby/hub_world.py` is the same lobby and games built inside Blender 5 (Windows only). It is a design reference and does not send data to Stick Drift. See [legacy/blender_lobby/README.md](legacy/blender_lobby/README.md).
-
 ## 🩺 What caregivers see
 
 - **Dashboard** (`/caregiver`). Every resident with a risk badge ("No concerns", "Keep an eye on", "Check soon"), who is playing right now, and visits that just finished.
@@ -88,7 +80,7 @@ A temporal convolutional network (PyTorch) that scores each visit 0–100 for re
 
 One shared network reads short stretches of each hand's movement and gives two outputs per hand: shake and impairment. `parkinson` is the impairment both hands share, `stroke` is the gap between the hands, and `essential_tremor` is the higher shake score of the two hands.
 
-When a lobby visit ends, `ml/visit_report/report.py` scores Apple Picking and Harbour Fishing with the model. The `parkinson` and `essential_tremor` scores are averaged across the two games; `stroke` comes from Apple Picking, the only game where both hands move together. **Rat Catching is not scored by the model.** Its correctness (target rats caught, misses, wrong slams) and reaction time are counted directly from the game's events. Garden visits are scored by `ml/pattern_model/score_garden.py`.
+When a lobby visit ends, `ml/visit_report/report.py` scores Apple Picking and Harbour Fishing with the model. The `parkinson` and `essential_tremor` scores are averaged across the two games; `stroke` comes from Apple Picking, the only game where both hands move together. **Rat Catching is not scored by the model.** Its correctness (target rats caught, misses, wrong slams) and reaction time are counted directly from the game's events.
 
 The model is trained locally by the team, on a laptop, from the lobby visits we played and recorded (plus synthetic data), and saved as `ml/runs/pattern_model/model.pt`. That file is committed to the repo, and the backend loads it from disk each time it scores a visit, including at demo time. Nothing is trained or downloaded while the app runs. It was not trained on patients. Each score is resemblance to a movement pattern, never a diagnosis or a disease probability. The assistant and report refuse every condition name. The model no longer scores diabetes or ataxia, and the loader skips the old recordings for those patterns.
 
@@ -150,20 +142,12 @@ For the cross-laptop setup, each laptop runs its own API and web app against the
 | `GEMINI_API_KEY` | Enables the AI assistant and the PDF narrative; without it the rule-based and template text are used |
 | `GEMINI_MODEL` | Optional model override (default `gemini-3.8-flash`, with fallbacks) |
 | `CORS_ORIGINS` | Allowed web origins, comma separated (default `http://localhost:5173`) |
-| `GARDEN_RECORDING_TIMEZONE` | Timezone of garden CSV timestamps (default `America/Toronto`) |
-| `STICKDRIFT_GAME_PYTHON`, `STICKDRIFT_API_URL` | Where the API finds the root uv environment's Python (garden game, pattern model, hand replays; default `../.venv/bin/python`, on Windows set it to `.venv\Scripts\python.exe`), and its own URL |
+| `GARDEN_RECORDING_TIMEZONE` | Timezone of old garden CSV timestamps, for `scripts.import_garden` (default `America/Toronto`) |
+| `STICKDRIFT_GAME_PYTHON` | Where the API finds the root uv environment's Python (visit report and hand replays; default `../.venv/bin/python`, on Windows set it to `.venv\Scripts\python.exe`) |
 
-### 🌻 Running the garden game
+### 🌻 Old garden recordings
 
-From the repository root:
-
-```bash
-uv sync
-uv run python "legacy/garden/garden.py" --player P01 --session 1 --fullscreen
-uv run python "legacy/garden/garden.py" --demo --mute     # keyboard, labelled synthetic
-```
-
-Each run writes `data/<timestamp>_garden_<player>_all-levels/` with one CSV and `level.json` per chapter, then imports it into Tiger Data when `backend/.env` is configured. Use `--no-tiger-sync` to skip the import, and `--reduced-motion` to still decorative motion. To import recordings later:
+Before the browser lobby, residents played a pygame garden game (`garden-v3`, since removed). Visits already imported from it still appear on resident pages as **Garden visits**. Recording folders that were never imported can still be loaded:
 
 ```bash
 cd backend
@@ -215,7 +199,7 @@ From the fourth game visit with the controller, a resident's latest visits are c
 backend/                     FastAPI API (its own venv, backend/requirements.txt)
   app/main.py                App setup, health, imported garden data
   app/auth.py                Resident and caregiver accounts, login sessions, access code
-  app/live.py                Live sessions (lobby and garden): ingest, saving visits, end-of-visit scoring
+  app/live.py                Live lobby sessions: ingest, saving visits, end-of-visit scoring
   app/live_stream.py         LISTEN/NOTIFY hub and the caregiver WebSocket
   app/measurements.py        Per-hand reach, tracking and shake: the one definition, also used by ml/visit_report
   app/residents.py           Caregiver endpoints for residents and their visits
@@ -225,7 +209,7 @@ backend/                     FastAPI API (its own venv, backend/requirements.txt
   app/gemini.py              The Gemini client shared by the assistant and the report
   app/hand_replays.py        Stores and serves each visit's reconstructed-hands GIF
   sql/                       Tiger Data schema (schema.sql, auth_schema.sql)
-  scripts/                   Demo data, demo logins, garden import
+  scripts/                   Demo data, demo logins, old garden import
 web/                         Website (React + Vite) and the browser lobby games
   src/                       Login, resident home, caregiver dashboard, live view, resident pages
   lobby.html, lobby/         3D lobby and games (three.js); live.js streams, measure.js measures
@@ -238,9 +222,6 @@ ml/                          Everything in the root uv environment (Python 3.14,
 tests/
   backend/  ml/  web/        Python (unittest) and Node tests for each part
 docs/                        Project context and decision log (context.md), product brief, UX notes
-legacy/
-  garden/                    DualSense HID reader and the pygame garden game
-  blender_lobby/             Blender version of the lobby (design reference)
 deploy/worker.js             Cloudflare Worker that proxies /api (config: wrangler.jsonc at the root)
 data/                        Local recordings (gitignored)
 ```
@@ -264,7 +245,6 @@ All caregiver routes need a caregiver login; `/me/*` routes need a resident logi
 | GET / POST | `/auth/me`, `/auth/logout` | Current account, log out |
 | POST | `/me/lobby/start` | Open a live session for the lobby; returns a one-time stream token |
 | POST | `/live/ingest`, `/live/end` | Stream samples and events with the token; end the visit (saves it to history) |
-| POST / GET | `/me/garden/launch`, `/me/garden` | Launch the desktop garden game on this computer and check its state |
 | GET | `/caregiver/residents`, `/caregiver/residents/{id}` | Residents with risk; one resident's visits, insights and concerns |
 | GET | `/caregiver/live`, `/caregiver/live/{id}` | Live and recently finished sessions; one session's state and samples |
 | GET | `/caregiver/sessions/{id}/hand-replay.gif` | A lobby visit's reconstructed-hands GIF (404 when it has none) |

@@ -1,7 +1,6 @@
-"""Live sessions: the resident's web lobby (and the older garden game) streamed to caregivers.
+"""Live sessions: the resident's web lobby streamed to caregivers.
 
-The lobby tab and the garden game post samples and game events to /live/ingest
-with a token. Everything about a running session lives in TigerData:
+The lobby tab posts samples and game events to /live/ingest with a token. Everything about a running session lives in TigerData:
 `live_sessions` holds its status, token hash and running measurements,
 `live_samples` its samples and `live_events` the in-game events the visit report
 needs. Each request loads the session row (locked), applies the batch and writes
@@ -10,10 +9,6 @@ run more than one worker, and restarting it does not lose a visit in progress:
 the tab keeps posting and the next request picks up where the last one stopped.
 
 Caregivers on any computer sharing the database watch through live_stream.py.
-
-The garden game is the exception: the API that launched it watches its local
-process. If that API restarts mid-game, the stream keeps working but the
-end-of-game scoring does not run; the game still saves its files for a later import.
 """
 import hashlib
 import json
@@ -44,11 +39,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["live"])
 
 ROOT = Path(__file__).resolve().parents[2]
-GAME_SCRIPT = ROOT / "legacy" / "garden" / "garden.py"
 GAME_PYTHON = Path(os.environ.get("STICKDRIFT_GAME_PYTHON", ROOT / ".venv" / "bin" / "python"))
-LOG_DIR = ROOT / "data" / ".live-logs"
-API_URL = os.environ.get("STICKDRIFT_API_URL", "http://127.0.0.1:8000")
-TIMEZONE = os.environ.get("GARDEN_RECORDING_TIMEZONE", "America/Toronto")
 HOST = socket.gethostname()
 CHANNEL = "stickdrift_live"  # NOTIFY channel; caregiver APIs LISTEN on it (see live_stream.py)
 NOTIFY_MAX = 7000            # Postgres caps a payload at 8000 bytes; bigger batches send only a pointer
@@ -56,7 +47,6 @@ NOTIFY_MAX = 7000            # Postgres caps a payload at 8000 bytes; bigger bat
 ACTIVE = {"starting", "waiting", "ready", "playing", "paused", "saving", "scoring"}
 OPEN = sorted(ACTIVE - {"scoring"})  # statuses that still accept samples
 STATE_EVERY_S = 0.5      # how often the caregiver-facing measurements are rewritten and announced
-HEARTBEAT_S = 5          # the launching API touches a garden row while the game runs
 STALE_S = 20             # an active row older than this lost its game or tab
 RECENT_H = 6             # finished sessions listed under "Just finished"
 LOBBY_GAMES = ("apple", "fish", "rat")
@@ -318,14 +308,6 @@ def _apply(conn, token: str, items: List[Any], kind: Optional[str] = None) -> Op
     return s
 
 
-def _heartbeat(live_id: UUID):
-    try:
-        with pool.connection() as conn:
-            conn.execute("UPDATE live_sessions SET updated_at = now() WHERE live_id = %s", (live_id,))
-    except Exception:
-        log.exception("Live heartbeat failed")
-
-
 def _prune_db():
     try:
         save_unsaved_lobbies()  # never drop a finished lobby visit that hasn't reached the history yet
@@ -335,183 +317,10 @@ def _prune_db():
         log.exception("Pruning old live sessions failed")
 
 
-# ---- garden game: end of session ------------------------------------------------
-
-MODEL = ROOT / "ml" / "runs" / "pattern_model" / "model.pt"
-GARDEN_PROCS: Dict[UUID, subprocess.Popen] = {}  # garden games this process launched on this computer
-
-
-def _score(folder: str) -> dict:
-    if not MODEL.is_file():
-        raise RuntimeError("the pattern model has not been trained yet; train it to create ml/runs/pattern_model/model.pt")
-    out = subprocess.run([str(GAME_PYTHON), "-m", "ml.pattern_model.score_garden", folder], cwd=ROOT, capture_output=True,
-                         text=True, timeout=300)
-    if out.returncode != 0:
-        raise RuntimeError(out.stderr.strip().splitlines()[-1] if out.stderr.strip() else "scorer failed")
-    return json.loads(out.stdout)
-
-
-def _store(s: LiveSession, tcn: Optional[dict]) -> Optional[UUID]:
-    from scripts.import_garden import import_one  # backend/scripts, imported lazily
-
-    with pool.connection() as conn:
-        _, _, _, _, session_id = import_one(conn, Path(s.folder), "site-live", TIMEZONE,
-                                            participant_id=s.participant_id)
-        if session_id is None:
-            return None
-        conn.execute(
-            """UPDATE session_summaries
-               SET metrics = metrics || %s, code_version = 'garden-live-v1', computed_at = now()
-               WHERE session_id = %s""",
-            (Jsonb({"live": s.metrics.summary(), "tcn": tcn}), session_id),
-        )
-        conn.execute("UPDATE sessions SET quality = 'good' WHERE session_id = %s AND quality IS NULL "
-                     "AND status = 'completed'", (session_id,))
-        return session_id
-
-
-def _finalize(s: LiveSession):
-    with s.lock:
-        s.metrics.close_trial()
-        folder = s.folder
-    session_json = Path(folder) / "session.json" if folder else None
-    levels = []
-    if session_json and session_json.is_file():
-        try:
-            levels = json.loads(session_json.read_text(encoding="utf-8")).get("levels", [])
-        except (OSError, ValueError):
-            levels = []
-    if not levels:
-        with s.lock:
-            s.status, s.ended_at = "stopped", _now()
-            s.error = "The game closed before the first chapter, so there is nothing to judge."
-        _persist(s)
-        return
-
-    with s.lock:
-        s.status = "scoring"
-    _persist(s)
-    tcn, error = None, None
-    try:
-        tcn = _score(folder)
-    except Exception as e:  # scorer problems must not lose the recording
-        log.exception("TCN scoring failed for %s", folder)
-        error = f"The pattern model could not score this session ({e})."
-    session_id = None
-    try:
-        session_id = _store(s, tcn)
-    except Exception as e:
-        log.exception("Saving garden session failed for %s", folder)
-        error = (error + " " if error else "") + f"Saving to TigerData failed ({e}); the files are kept in {folder}."
-    with s.lock:
-        s.result, s.db_session_id, s.error = tcn, session_id, error
-        s.status = "finished" if tcn is not None else "failed"
-        s.ended_at = _now()
-    _persist(s)
-
-
-def _watch(live_id: UUID, proc: subprocess.Popen, log_file):
-    try:
-        while True:
-            try:
-                proc.wait(timeout=HEARTBEAT_S)
-                break
-            except subprocess.TimeoutExpired:
-                _heartbeat(live_id)
-    finally:
-        log_file.close()
-    s = None
-    try:
-        s = _load(live_id)  # the game's samples and events were applied by whichever process received them
-        if s is not None:
-            _finalize(s)
-    except Exception:
-        log.exception("Finalizing live session failed")
-        if s is not None:
-            with s.lock:
-                s.status, s.ended_at = "failed", _now()
-                s.error = s.error or "Something went wrong while finishing this session."
-            _persist(s)
-    finally:
-        GARDEN_PROCS.pop(live_id, None)
-
-
-def _garden_here(participant_id: Optional[UUID] = None) -> Optional[dict]:
-    """A garden game running on this computer (any API process on it), optionally only this resident's."""
-    with pool.connection() as conn:
-        return conn.execute(
-            """SELECT participant_id, status, level FROM live_sessions
-               WHERE kind = 'garden' AND host = %s AND status = ANY(%s)
-                 AND updated_at > now() - make_interval(secs => %s)
-                 AND (%s::uuid IS NULL OR participant_id = %s::uuid)
-               ORDER BY started_at DESC LIMIT 1""",
-            (HOST, sorted(ACTIVE), STALE_S, participant_id, participant_id),
-        ).fetchone()
-
-
-# ---- resident ---------------------------------------------------------------
-
-class LaunchIn(BaseModel):
-    keyboard: bool = False
-
-
-class GardenStatus(BaseModel):
-    """What a resident sees: whether the game is open. No scores or history."""
-    active: bool
-    status: Optional[str] = None
-    level: Optional[str] = None
-
-
-_launch_lock = threading.Lock()
-
-
-@router.post("/me/garden/launch", response_model=GardenStatus, status_code=201)
-def launch(body: LaunchIn, me: dict = Depends(current_senior)):
-    if not GAME_PYTHON.is_file():
-        raise HTTPException(503, "The game isn't installed on this computer yet. Ask a staff member to run "
-                                 "`uv sync` in the project folder.")
-    with _launch_lock:
-        mine = _garden_here(me["account_id"])
-        if mine is not None:
-            return {"active": True, "status": mine["status"], "level": mine["level"]}
-        if _garden_here() is not None:
-            raise HTTPException(409, "Someone else is already playing on this computer. Try again in a few minutes.")
-        s = LiveSession(me["account_id"], me["display_name"], body.keyboard)
-        token = _create(s, "garden")
-
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = open(LOG_DIR / f"{s.id}.log", "w")
-    player = "".join(c if c.isalnum() or c in "-_" else "_" for c in (me.get("username") or "resident"))[:24]
-    cmd = [str(GAME_PYTHON), str(GAME_SCRIPT), "--player", player, "--label", "site", "--no-tiger-sync"]
-    if body.keyboard:
-        cmd.append("--demo")
-    env = {**os.environ, "STICKDRIFT_LIVE_URL": f"{API_URL}/live/ingest", "STICKDRIFT_LIVE_TOKEN": token}
-    env.pop("DATABASE_URL", None)
-    try:
-        proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=log_file, stderr=subprocess.STDOUT,
-                                start_new_session=True)
-    except OSError as e:
-        log_file.close()
-        s.status, s.ended_at, s.error = "failed", _now(), f"The game could not start ({e})."
-        _persist(s)
-        raise HTTPException(500, f"The game could not start ({e}).")
-    GARDEN_PROCS[s.id] = proc
-    _prune_db()
-    threading.Thread(target=_watch, args=(s.id, proc, log_file), name=f"garden-{s.id}", daemon=True).start()
-    return {"active": True, "status": s.status, "level": None}
-
-
-@router.get("/me/garden", response_model=GardenStatus)
-def my_garden(me: dict = Depends(current_senior)):
-    row = _garden_here(me["account_id"])
-    return {"active": row is not None, "status": row["status"] if row else None,
-            "level": row["level"] if row else None}
-
-
 # ---- browser lobby ------------------------------------------------------------
 # The 3D lobby (web/lobby.html) runs in the resident's own browser tab. It opens a
 # live session here with their login cookie and streams its stick samples to
-# /live/ingest like the garden game does. When the tab closes, the visit's in-game
+# /live/ingest. When the tab closes, the visit's in-game
 # samples and events are read back from live_samples/live_events, ml.visit_report
 # scores Apple Picking and Harbour Fishing and counts Rat Catching, and that
 # document is stored with the visit.

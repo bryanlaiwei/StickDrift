@@ -291,12 +291,6 @@ export interface LiveSnapshot extends LiveBrief {
   hand_replay_pending?: boolean
 }
 
-export interface GardenStatus {
-  active: boolean
-  status: LiveStatus | null
-  level: string | null
-}
-
 export interface ChatTurn {
   role: 'user' | 'assistant'
   text: string
@@ -390,8 +384,6 @@ export const api = {
     post<Me>('/auth/caregiver/login', { username, password }),
   logout: () => post<void>('/auth/logout'),
 
-  myGarden: () => request<GardenStatus>('/me/garden'),
-  launchGarden: (keyboard: boolean) => post<GardenStatus>('/me/garden/launch', { keyboard }),
 
   gardenRecordings: () => request<GardenRecording[]>('/garden/recordings'),
   gardenTimeline: (sessionId: string) =>

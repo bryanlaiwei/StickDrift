@@ -1,7 +1,6 @@
 // DualSense motion sensors over WebHID (Chrome / Edge). The Gamepad API in input.js has no gyro or
 // accelerometer, so this opens the same pad as a HID device and keeps the latest raw report.
-// Byte layout matches "legacy/garden/read_data.py", so values are the same raw int16
-// units the garden recorder writes.
+// Values are the raw int16 units of the DualSense HID report (the same units the old garden recordings use).
 // Opening the pad switches a Bluetooth DualSense to full reports, which Chrome's Gamepad API on
 // Windows cannot decode (sticks freeze). So while reports arrive, pad() also supplies the sticks and
 // buttons in the Gamepad API's standard layout and input.js reads those instead.

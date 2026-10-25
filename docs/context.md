@@ -6,9 +6,9 @@
 
 ## 0. Current build state (2026-10-25)
 
-**The product pivoted from the planned arrow assessment (`assess-v1`) to games.** Residents play a **web 3D lobby** with three games (Apple Picking, Harbour Fishing, Rat Catching) in the browser with a PS5 controller. Caregivers on any computer watch live and review each resident's visits. The arrow game was built briefly in the browser, then removed (§13). The pygame **Mabel's Moonflower Garden** remains as a desktop game whose recordings train the pattern model.
+**The product pivoted from the planned arrow assessment (`assess-v1`) to games.** Residents play a **web 3D lobby** with three games (Apple Picking, Harbour Fishing, Rat Catching) in the browser with a PS5 controller. Caregivers on any computer watch live and review each resident's visits. The arrow game was built briefly in the browser, then removed (§13). The earlier pygame **Mabel's Moonflower Garden** was removed on 2026-10-25; its imported visits stay viewable.
 
-**Hardware:** one Sony DualSense (PS5) controller per resident laptop, read through the browser Gamepad API (~60 Hz). The Python HID reader (~500 Hz) is used by the garden game.
+**Hardware:** one Sony DualSense (PS5) controller per resident laptop, read through the browser Gamepad API (~60 Hz).
 
 **Database:** Tiger Data (managed PostgreSQL + TimescaleDB). It is also the only link between laptops: live sessions are shared through it.
 
@@ -24,15 +24,14 @@
 | Resident page | **Built.** Overview (status banner, potential concerns with evidence, recommended checks, possible reasons, research basis), Trends (per-game lines per hand across visits; garden and earlier sessions when present), Game visits, Garden visits, Ask the assistant. | `web/src/pages/ResidentDetail.tsx` |
 | Rule-based insights | **Built.** Lobby game visits are the personal baseline: the latest 1–2 controller visits against the median of earlier ones, per game and hand (reaction time, time to reach, distance from the lane, time on the lane); needs 4 visits, keyboard visits left out. Demo residents' older session summaries stand in when there are too few visits. | `backend/app/insights.py` |
 | AI assistant | **Built.** Gemini (`gemini-3.8-flash` with fallbacks) answers from structured facts only; numbers not in the facts are flagged, disease names trigger a clinician referral, and a rule-based answer is used when Gemini is unavailable. | `backend/app/assistant.py` |
-| Pattern model (TCN) | **Built by a teammate; checkpoint committed (`ml/runs/pattern_model/model.pt`).** Scores garden and lobby recordings 0–100 for resemblance to three patterns, keyed `parkinson`, `stroke`, `essential_tremor`. Caregivers and the assistant see only neutral movement labels (§4.1). One visit ≥ 50 is "keep an eye on"; "check soon" needs the two latest judged visits ≥ 70. These thresholds are untested choices. No held-out evaluation is recorded. | `ml/pattern_model/`, `ml/pattern_model/score_garden.py` |
-| Mabel's Moonflower Garden (`garden-v3`) | **Implemented and played with real controllers.** Four chapters, full-rate HID CSV per level, imported into Tiger Data. The API can still launch it (`/me/garden/launch`, with live streaming and model judging at the end), but the site no longer links to it. | `legacy/garden/` |
-| Blender lobby | **Built by a teammate (Windows only).** Design reference; sends no data. | `legacy/blender_lobby/` |
+| Pattern model (TCN) | **Built by a teammate; checkpoint committed (`ml/runs/pattern_model/model.pt`).** Scores garden and lobby recordings 0–100 for resemblance to three patterns, keyed `parkinson`, `stroke`, `essential_tremor`. Caregivers and the assistant see only neutral movement labels (§4.1). One visit ≥ 50 is "keep an eye on"; "check soon" needs the two latest judged visits ≥ 70. These thresholds are untested choices. No held-out evaluation is recorded. | `ml/pattern_model/`, `ml/visit_report/` |
+| Mabel's Moonflower Garden (`garden-v3`) | **Removed 2026-10-25.** Its visits already in Tiger Data still show as Garden visits; `backend/scripts/import_garden.py` can import leftover recording folders. | — |
 | Synthetic demo data | **Built.** Demo Resident A/B with 7 labelled-synthetic arrow-style sessions each, shown as "Earlier sessions". | `backend/scripts/seed_synthetic.py` |
 | Review-card workflow (acknowledge / needs assessment / dismiss with note) | **Not built.** Concerns are shown but staff can't record an outcome yet. | — |
 
 **Run it:** see `README.md` → *Running locally*. Each laptop needs `backend/.env` with the Tiger Data connection string (copy `backend/.env.example`). Never commit `.env`. After pulling, restart both the API and the web dev server.
 
-**Python environments:** the root `uv` project (Python ≥ 3.14: `hidapi`, `pygame-ce`, `torch`, `numpy`) runs the garden game and the pattern model. The backend uses `backend/requirements.txt` in `backend/.venv` (tested on 3.9) and calls the root environment for scoring.
+**Python environments:** the root `uv` project (Python ≥ 3.14: `torch`, `numpy`, `scipy`, `matplotlib`) runs the pattern model, the visit report and hand replays. The backend uses `backend/requirements.txt` in `backend/.venv` (tested on 3.9) and calls the root environment for scoring.
 
 ## 1. The project in one paragraph
 
@@ -90,9 +89,9 @@ The fixed arrow assessment (`assess-v1`) planned here was never kept; see §13. 
 
 Left-right differences are computed for every measurement both hands produce. Each visit is stored with its per-game summaries (`session_summaries.metrics.games`) and every attempt (`reach_trials`).
 
-### Mabel's Moonflower Garden (`garden-v3`)
+### Mabel's Moonflower Garden (`garden-v3`, removed 2026-10-25)
 
-Position-controlled (stick position is the cursor), fixed course, four chapters: apples with both hands (mirrored targets), a left-hand butterfly, a right-hand butterfly, watering with both hands. Records every HID report (~500 Hz) per chapter to CSV/JSON; story screens and breaks are not recorded. These recordings, played by teammates simulating movement patterns, are the pattern model's training data. Keep `garden-v2` and `garden-v3` separate.
+Kept for reading its old visits. Position-controlled (stick position is the cursor), fixed course, four chapters: apples with both hands (mirrored targets), a left-hand butterfly, a right-hand butterfly, watering with both hands. Records every HID report (~500 Hz) per chapter to CSV/JSON; story screens and breaks are not recorded. These recordings, played by teammates simulating movement patterns, are the pattern model's training data. Keep `garden-v2` and `garden-v3` separate.
 
 ### Caveats that apply to both
 
@@ -128,7 +127,6 @@ Position-controlled (stick position is the cursor), fixed course, four chapters:
 - **Same controller for baseline and follow-ups.** Record a controller ID on every session (`sessions.controller_id`).
 - **Placement:** in hands, on a table, or on a lap. Test what is comfortable for someone with reduced dexterity, use it consistently, and record it (`sessions.placement`).
 - **Browser reader:** Chrome only exposes a gamepad after a button on it is pressed. The lobby's start screen asks for a button press first, and visits are corrected from "keyboard" to "controller" once analog stick values arrive. The standard mapping puts the left stick on axes 0/1 and the right stick on 2/3. DualSense is vendor `054c`, product `0ce6` (Edge: `0df2`).
-- **Python HID reader:** `uv run "legacy/garden/read_data.py"` (or `pip install hidapi`). Shows a live viewer; press **R** to record a CSV, **Esc** to quit. Only one program may hold the HID device; close it before another reader opens the controller.
 - **Do not use haptics, adaptive triggers or the light bar in assessment mode** unless they are identical in every session.
 - **Fallback:** the lobby can be played with the keyboard (WASD, IJKL, Space, O) using the same data format; those visits are labelled **keyboard input** on every caregiver screen.
 
@@ -146,7 +144,7 @@ FastAPI ──INSERT + NOTIFY──► Tiger Data ◄──LISTEN / reads── 
 - **Web:** Vite + React + TypeScript (`web/src`) plus the three.js lobby (`web/lobby`, a second Vite page). Routes: `/`, `/login`, `/signup`, `/caregiver/login`, `/caregiver/signup`, `/caregiver`, `/caregiver/residents/:id`, `/caregiver/live/:id`, and `/lobby.html`. The Vite dev server proxies `/api` (with WebSockets) to the local API.
 - **API:** Python, FastAPI, psycopg 3 with a connection pool, plus one dedicated `LISTEN` connection while a caregiver is watching. Connection string from `DATABASE_URL` in `backend/.env`.
 - **Database:** Tiger Data. `raw_samples` is a hypertable; `live_sessions`/`live_samples` are a short-term buffer pruned after a day (unsaved finished visits are saved first). Apply `backend/sql/schema.sql` and `backend/sql/auth_schema.sql` (both safe to re-run).
-- **Pattern model:** PyTorch in the root `uv` environment; the API runs `ml/pattern_model/score_garden.py` as a subprocess.
+- **Pattern model:** PyTorch in the root `uv` environment; the API runs `ml.visit_report.report` as a subprocess when a lobby visit ends.
 - Never make the game wait on the database or a model call: the lobby posts asynchronously and drops old samples if the network stalls.
 
 ## 8. AI/ML strategy: useful, bounded, and honest
@@ -185,8 +183,8 @@ The schema in `backend/sql/schema.sql` implements these contracts. Change the sc
 
 | Priority | Deliverable | Definition of done | Status |
 | --- | --- | --- | --- |
-| P0 | Controller + stable data stream | Both sticks map to four live normalized axes; disconnects visible. | Done in the browser lobby and the garden game; tested with real controllers. |
-| P0 | Games residents enjoy | Accessible, age-respectful games with clear instructions and an easy exit. | Lobby with three games built; garden game built. Older-adult playtesting not done. |
+| P0 | Controller + stable data stream | Both sticks map to four live normalized axes; disconnects visible. | Done in the browser lobby; tested with real controllers. |
+| P0 | Games residents enjoy | Accessible, age-respectful games with clear instructions and an easy exit. | Lobby with three games built. Older-adult playtesting not done. |
 | P0 | Baseline and trends | Transparent personal comparison, quality labels, clearly marked simulated data. | Trends across visits built; rule-based baseline on lobby visits built. |
 | P0 | Care-team view | Clear potential concerns with raw evidence and context; live view. | Dashboard, live view, resident page and concerns built; acknowledgement workflow not built. |
 | P1 | Useful AI | Grounded assistant and/or model **with** rule-based comparison and stated limits. | Assistant built with checks; pattern model built and committed, no held-out evaluation yet. |
@@ -202,7 +200,6 @@ The schema in `backend/sql/schema.sql` implements these contracts. Change the sc
 - **When does a lobby game change need a new protocol version?** Teammates are tuning rat speed, fishing rounds and lane position. Agree which changes bump `lobby-v1`.
 - **Lobby baseline:** how many visits, over how many days, before lobby visits feed concerns (see §6)?
 - **Pattern model:** who trains the checkpoint, on which recordings, and how is it evaluated per participant before its scores are shown?
-- **Garden game:** keep it as a data-collection tool only, or link it from the site again?
 - **One Python environment:** root `uv` (3.14) vs `backend/requirements.txt` (3.9). Fold them together or keep them separate on purpose.
 - Is holding the controller comfortable for someone with reduced dexterity, or should it rest on a table? Test placement and let people decline without that becoming a score.
 - Can we recruit any **consenting older adults and care staff** for feedback? Without them, label usability conclusions preliminary.
@@ -244,6 +241,7 @@ These sources inform the direction; none validate *this joystick protocol*.
 | 2026-10-25 | **Neutral labels are the policy.** The code had drifted to showing "Model pattern: Parkinson's / Stroke"; caregivers, the assistant and the report now see only neutral movement labels, and every condition name is refused. | Restores §4.1. |
 | 2026-10-25 | **Motion data (gyro/accelerometer) may feed the pattern model.** Supersedes the 2026-10-16 exclusion. | The model already reads it; its output stays pattern resemblance, never tremor detection. |
 | 2026-10-25 | Live sessions live in Tiger Data instead of the API's memory; the API no longer writes lobby CSVs to disk. | Restarts and more than one worker no longer drop visits; one copy of each visit, linked to the resident. Training reads local recordings. |
+| 2026-10-25 | **Remove the pygame garden game and the Blender lobby** (the old `legacy/` folder) and the API route that launched the garden. | The browser lobby replaced both; imported garden visits stay viewable. |
 | 2026-10-25 | Lobby visits set the personal baseline; "check soon" from the pattern model needs two judged visits in a row. | One noisy visit should not raise the strongest prompt. |
 
 **Editing rule:** When changing this document, update §0, the protocol version/assumptions, this decision log, and the demo claims together. Preserve the mission and evidence boundaries unless the team explicitly decides to pivot.
