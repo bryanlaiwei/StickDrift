@@ -7,8 +7,8 @@ import { motion } from './motion.js'
 const DEADZONE = 0.2
 
 // Standard Gamepad mapping (W3C). Fixed width so every recording row has the same columns.
-export const AXIS_COUNT = 8
-export const BUTTON_NAMES = [
+const AXIS_COUNT = 8
+const BUTTON_NAMES = [
   'cross', 'circle', 'square', 'triangle', 'l1', 'r1', 'l2', 'r2',
   'share', 'options', 'l3', 'r3', 'dpad_up', 'dpad_down', 'dpad_left', 'dpad_right', 'ps', 'touchpad',
 ]

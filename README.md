@@ -204,7 +204,6 @@ ml/                          Everything in the root uv environment (Python 3.14,
   pattern_model/             Movement pattern model: recordings, network, training, scoring
   visit_report/              Scores a finished lobby visit (pattern model + Rat Catching counts)
   hand_replay/               Reconstructed hands + controller GIFs
-  study/                     Tools for the Noy et al. (2025) mirror-game tracking dataset
   runs/pattern_model/        Trained checkpoint (model.pt)
 tests/
   backend/  ml/  web/        Python (unittest) and Node tests for each part

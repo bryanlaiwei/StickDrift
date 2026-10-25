@@ -1,6 +1,6 @@
 // DualSense motion sensors over WebHID (Chrome / Edge). The Gamepad API in input.js has no gyro or
 // accelerometer, so this opens the same pad as a HID device and keeps the latest raw report.
-// Values are the raw int16 units of the DualSense HID report (the same units the old garden recordings use).
+// Values are the raw int16 units of the DualSense HID report, the units the pattern model was trained on.
 // Opening the pad switches a Bluetooth DualSense to full reports, which Chrome's Gamepad API on
 // Windows cannot decode (sticks freeze). So while reports arrive, pad() also supplies the sticks and
 // buttons in the Gamepad API's standard layout and input.js reads those instead.
@@ -9,8 +9,6 @@ const FILTERS = [
   { vendorId: 0x054c, productId: 0x0df2 }, // DualSense Edge
 ]
 const STALE_MS = 100
-
-export const MOTION_CELLS = 14 // gyro xyz, acc xyz, t1 active/x/y, t2 active/x/y, battery, Mute
 
 // Chrome scales a 0-255 stick byte to -1..1 this way (128 -> 0.0039), so recordings keep the same values.
 const axis = (v) => (v - 127.5) / 127.5
@@ -53,7 +51,7 @@ function parse(view, o) {
   return cells
 }
 
-export class Motion {
+class Motion {
   constructor() {
     this.supported = typeof navigator !== 'undefined' && !!navigator.hid
     this.device = null

@@ -1,19 +1,15 @@
-"""Turn one lobby level recording into per-frame controller pose and per-hand shake.
+"""Turn a finished lobby visit's frames into per-frame controller pose and per-hand shake.
 
-Two inputs share one path: a recorded level folder (`controller_data.csv`) and the frame dicts the API keeps
-in memory during a live lobby visit (the capture `ml.visit_report` gets).
+The input is the capture `ml.visit_report` also gets: per game, the frame dicts read back from the live session.
 
 Body frame used everywhere: x to the player's right, y away from the player, z up (centimetres, radians).
 """
 
 from __future__ import annotations
 
-import csv
-import json
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 from scipy import signal
@@ -83,11 +79,6 @@ def _columns(rows: Iterable[dict], names: dict[str, str] | None = None) -> dict[
     return {key: np.array([cell(row, key) for row in rows], dtype=float) for key in NUMERIC}
 
 
-def read_level(csv_path: Path) -> dict[str, np.ndarray]:
-    with open(csv_path, newline="") as handle:
-        return _columns(csv.DictReader(handle))
-
-
 def _resample(raw: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     order = np.argsort(raw["t"], kind="stable")
     t = raw["t"][order]
@@ -132,10 +123,6 @@ def _hand_shares(s: dict[str, np.ndarray]) -> np.ndarray:
     floor = 0.15 * max(float(np.median(jitter)), 1e-3)
     shares = 2 * (jitter + floor) / (jitter.sum(axis=1, keepdims=True) + 2 * floor)
     return np.clip(shares, *SHARE_LIMITS)
-
-
-def reconstruct(csv_path: Path, gain: float = 10.0) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-    return reconstruct_columns(read_level(csv_path), gain)
 
 
 def reconstruct_columns(raw: dict[str, np.ndarray], gain: float = 10.0) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
@@ -184,11 +171,6 @@ def peak_frequency(rate: np.ndarray) -> float:
     power = power.sum(axis=1)
     band = (freqs >= TREMOR_BAND_HZ[0]) & (freqs <= TREMOR_BAND_HZ[1])
     return float(freqs[band][np.argmax(power[band])])
-
-
-def load_motion(level_dir: Path, label: str, seconds: float = 8.0, fps: int = 25, gain: float = 10.0) -> Motion:
-    s, derived = reconstruct(level_dir / "controller_data.csv", gain)
-    return _window_motion(s, derived, label, seconds, fps, gain)
 
 
 def _window_motion(s: dict[str, np.ndarray], derived: dict[str, np.ndarray], label: str,
@@ -273,11 +255,3 @@ def motion_from_capture(capture: dict, seconds: float = 6.0, fps: int = 25,
     if game is None:
         return None
     return game, motion_from_frames(capture[game]["frames"], game, seconds, fps, gain)
-
-
-def level_folder(session_dir: Path, level: str) -> Path | None:
-    meta = json.loads((session_dir / "session.json").read_text())
-    for entry in meta.get("levels", []):
-        if entry.get("level") == level and (session_dir / entry["folder"] / "controller_data.csv").exists():
-            return session_dir / entry["folder"]
-    return None

@@ -1,4 +1,4 @@
-"""Draw posed frames from an over-the-shoulder camera and write them out as a GIF."""
+"""Draw posed frames from an over-the-shoulder camera and write the hands-only GIF."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ import numpy as np
 from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgb, to_rgba
 from matplotlib.lines import Line2D
-from matplotlib.patches import Circle, FancyBboxPatch, Polygon
+from matplotlib.patches import Polygon
 from PIL import Image
 
-from ml.hand_replay.reconstruct import SHAKE_CAP_CM, Motion
-from ml.hand_replay.rig import Chain, Poly, pose_frame
+from ml.hand_replay.reconstruct import Motion
+from ml.hand_replay.rig import Poly, pose_frame
 from ml.hand_replay.styles import NATURAL, Style
 
 EYE = np.array([0.0, -44.0, 42.0])
@@ -29,17 +29,10 @@ SCREEN_LIGHT = np.array([-0.6, 0.8])
 VIEW_LIMITS = (-0.26, 0.26, -0.21, 0.19)
 THUMB_TRAIL_S = 0.6
 WRIST_TRAIL_S = 1.0
-STICK_TRAIL_S = 1.0
-STRIP_S = 4.0
-SHAKE_AXIS_CM = 0.4
-HAND_NAMES = ("left", "right")
 NAIL = "#f4d6c8"
-CARDS = {"scene": (0.012, 0.1, 0.6, 0.79), "sticks": (0.627, 0.53, 0.361, 0.36), "shake": (0.627, 0.1, 0.361, 0.4)}
-CARD_TITLES = {"scene": "Reconstructed hands", "sticks": "Thumb sticks (recorded)", "shake": "Hand shake, 3-12 Hz (real size, cm)"}
-AXES = {"scene": (0.02, 0.11, 0.585, 0.71), "sticks": (0.635, 0.545, 0.345, 0.27), "shake": (0.675, 0.19, 0.3, 0.23)}
 FONTS = ("Atkinson Hyperlegible", "Segoe UI", "DejaVu Sans")
 RENDERER_VERSION = "hands-natural-1"
-SCENE_INCHES = 4.8  # figure width whose line widths match the scene card of the full replay
+SCENE_INCHES = 4.8  # figure width the line widths are tuned for; more pixels only sharpen it
 SCENE_SIZE = (400, 300)
 GIF_BUDGET_BYTES = 1_500_000
 GIF_COLOURS = (64, 48, 40)
@@ -201,114 +194,6 @@ class Scene:
             self.trail(self.wrist_trails[hand], self.style.trail_colors[hand], 2.2)
 
 
-def _card(fig, rect, style: Style, title: str) -> None:
-    x, y, w, h = rect
-    fig.patches.append(FancyBboxPatch(
-        (x, y), w, h, boxstyle="round,pad=0,rounding_size=0.012", transform=fig.transFigure,
-        facecolor=style.surface or style.background, edgecolor=style.line or style.grid, lw=1, zorder=-10,
-    ))
-    fig.text(x + 0.014, y + h - 0.052, title, fontsize=9.5, weight="bold", color=style.ink)
-
-
-def _style_axis(ax, style: Style) -> None:
-    ax.set_facecolor(style.surface or style.background)
-    for spine in ax.spines.values():
-        spine.set_color(style.grid)
-    ax.tick_params(colors=style.muted, labelsize=7)
-    ax.xaxis.label.set_color(style.muted)
-
-
-def _stick_panel(ax, style: Style):
-    ax.set_xlim(-2.4, 2.4)
-    ax.set_ylim(-1.35, 1.35)
-    ax.set_aspect("equal")
-    ax.axis("off")
-    artists = []
-    for hand, cx in enumerate((-1.2, 1.2)):
-        color = style.trail_colors[hand]
-        ax.add_patch(Circle((cx, 0), 1.0, fill=False, color=style.muted, lw=1))
-        ax.plot([cx - 1, cx + 1], [0, 0], color=style.grid, lw=0.6)
-        ax.plot([cx, cx], [-1, 1], color=style.grid, lw=0.6)
-        ax.text(cx, -1.3, HAND_NAMES[hand], ha="center", fontsize=8, color=color)
-        (trail,) = ax.plot([], [], color=color, lw=1.2, alpha=0.6)
-        (dot,) = ax.plot([], [], "o", color=color, ms=7, mec=style.ink, mew=0.6)
-        (target,) = ax.plot([], [], "o", ms=11, mfc="none", mec=style.ink, mew=1.2)
-        artists.append((cx, trail, dot, target))
-    return artists
-
-
-def _shake_panel(ax, style: Style):
-    _style_axis(ax, style)
-    ax.set_ylim(0, SHAKE_AXIS_CM)
-    ax.set_xlabel("seconds", fontsize=8)
-    ax.grid(color=style.grid, alpha=0.6)
-    lines = [ax.plot([], [], color=style.trail_colors[hand], lw=1.4, label=HAND_NAMES[hand])[0] for hand in (0, 1)]
-    legend = ax.legend(loc="upper left", fontsize=7, ncol=2, facecolor=style.surface or style.background, edgecolor=style.grid)
-    for text in legend.get_texts():
-        text.set_color(style.ink)
-    return lines
-
-
-def render_frames(motion: Motion, fps: int, style: Style = NATURAL, width_px: int = 840) -> Iterator[Image.Image]:
-    """Yield each rendered frame; trails build up as frames advance."""
-    fig = plt.figure(figsize=(width_px / 100, width_px / 100 * 0.56), dpi=100, facecolor=style.background)
-    for name, rect in CARDS.items():
-        _card(fig, rect, style, CARD_TITLES[name])
-    scene = Scene(fig.add_axes(AXES["scene"]), Camera(EYE, LOOK_AT), style, fps)
-    sticks = _stick_panel(fig.add_axes(AXES["sticks"]), style)
-    strip_ax = fig.add_axes(AXES["shake"])
-    shake_lines = _shake_panel(strip_ax, style)
-    header = fig.text(0.01, 0.955, "", fontsize=11, weight="bold", color=style.ink)
-    sub = fig.text(0.01, 0.915, "", fontsize=8.5, color=style.muted)
-    footer = fig.text(0.01, 0.03, "", fontsize=8.5, color=style.muted)
-
-    stick_keep = max(2, int(STICK_TRAIL_S * fps))
-    strip_keep = int(STRIP_S * fps)
-    try:
-        for i in range(len(motion.time_s)):
-            scene.show(pose_frame(motion, i))
-
-            lo = max(0, i - stick_keep)
-            for hand, (cx, trail, dot, target) in enumerate(sticks):
-                xs = cx + motion.sticks[lo : i + 1, 2 * hand]
-                ys = -motion.sticks[lo : i + 1, 2 * hand + 1]
-                trail.set_data(xs, ys)
-                dot.set_data([xs[-1]], [ys[-1]])
-                tx, ty = motion.targets[i, 2 * hand], motion.targets[i, 2 * hand + 1]
-                target.set_data(([cx + tx], [-ty]) if np.isfinite(tx) and np.isfinite(ty) else ([], []))
-
-            lo = max(0, i - strip_keep)
-            times = motion.time_s[lo : i + 1]
-            for hand, line in enumerate(shake_lines):
-                line.set_data(times, motion.shake_cm[lo : i + 1, hand])
-            strip_ax.set_xlim(motion.time_s[i] - STRIP_S, motion.time_s[i] + 0.1)
-
-            header.set_text(motion.label)
-            sub.set_text(
-                f"t = {motion.time_s[i]:5.1f} s   |   shake drawn x{motion.gain:g} (soft cap {SHAKE_CAP_CM:g} cm)   |   "
-                f"dominant shake frequency {motion.peak_hz:.1f} Hz"
-            )
-            left, right = motion.shares[i]
-            footer.set_text(
-                f"Shake split by each thumb's own jitter:  left hand {left:.2f}   right hand {right:.2f}   "
-                f"(1.00 = even).  Trails: thumb tips and wrists."
-            )
-            fig.canvas.draw()
-            yield Image.fromarray(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy())
-    finally:
-        plt.close(fig)
-
-
-def render_gif(motion: Motion, out_path: Path, fps: int, style: Style = NATURAL) -> int:
-    images = [
-        frame.quantize(colors=96, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
-        for frame in render_frames(motion, fps, style)
-    ]
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    images[0].save(out_path, save_all=True, append_images=images[1:], duration=int(round(1000 / fps)), loop=0, optimize=True)
-    return len(images)
-
-
 def render_scene_frames(motion: Motion, fps: int, style: Style = NATURAL,
                         size: tuple[int, int] = SCENE_SIZE) -> Iterator[Image.Image]:
     """Only the hands and controller with their trails, on the dashboard's surface colour: no cards or text.
@@ -359,12 +244,3 @@ def render_scene_gif(motion: Motion, out_path: Path, fps: int, style: Style = NA
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
     return len(frames)
-
-
-def render_still(motion: Motion, out_path: Path, fps: int, frame: int, style: Style = NATURAL) -> None:
-    """PNG of one frame, rendered after the frames before it so its trails are in place."""
-    for i, image in enumerate(render_frames(motion, fps, style)):
-        if i == frame:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            image.save(out_path)
-            return

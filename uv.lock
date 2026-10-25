@@ -804,9 +804,6 @@ requires-dist = [
     { name = "torch", specifier = ">=2.14.1" },
 ]
 
-[package.metadata.requires-dev]
-study = []
-
 [[package]]
 name = "sympy"
 version = "1.14.0"

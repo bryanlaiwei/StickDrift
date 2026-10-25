@@ -143,12 +143,12 @@ export default function LiveSession() {
         </div>
       </div>
 
-      <ol className="chapter-track" aria-label="Games">
+      <ol className="game-track" aria-label="Games">
         {snap.levels.filter((l) => l !== 'lobby').map((c) => {
           const state = snap.levels_done.includes(c) ? 'done' : snap.level === c ? 'now' : 'todo'
           return (
-            <li key={c} className={`chapter chapter-${state}`}>
-              <span className="chapter-dot" aria-hidden />
+            <li key={c} className={`game-step game-step-${state}`}>
+              <span className="game-step-dot" aria-hidden />
               {levelName(c)}
               <span className="sr-only"> ({state === 'done' ? 'finished' : state === 'now' ? 'in progress' : 'not started'})</span>
             </li>

@@ -7,7 +7,6 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1) // must run before any camera/object is c
 export const TAU = Math.PI * 2
 export const RETURN_DELAY = 3 // seconds the results show before going back to the lobby
 export const clamp = (v, a, b) => Math.min(Math.max(v, a), b)
-export const lerp = (a, b, t) => a + (b - a) * t
 export const uniform = (a, b) => a + Math.random() * (b - a)
 export const choice = (arr) => arr[Math.floor(Math.random() * arr.length)]
 export function shuffle(arr) {
@@ -56,7 +55,6 @@ export function ownMat(rgb, opts = {}) {
   const m = mat(rgb, opts).clone()
   return m
 }
-export const lin = (rgb) => new THREE.Color().setRGB(rgb[0], rgb[1], rgb[2], THREE.LinearSRGBColorSpace)
 
 // ---- low-poly primitives (z-up) ---------------------------------------------------------
 function finish(mesh, parent, pos, shadow = true) {
@@ -193,7 +191,7 @@ export function unitCyl(r1, r2, material, segs = 6) {
   return m
 }
 
-/** Uniform Catmull-Rom point between p1 and p2 (same spline the pygame trace game used). */
+/** Uniform Catmull-Rom point between p1 and p2. */
 export function catmull(p0, p1, p2, p3, t) {
   return p1.map(
     (b, i) =>

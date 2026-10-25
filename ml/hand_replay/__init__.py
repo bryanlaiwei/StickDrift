@@ -1,1 +1,1 @@
-"""Rebuild a player's hands moving the DualSense from a lobby recording or a finished lobby visit and render it as a GIF."""
+"""Rebuild the resident's hands moving the DualSense from a finished lobby visit and render them as a GIF."""

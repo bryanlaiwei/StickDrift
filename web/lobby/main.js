@@ -159,8 +159,6 @@ async function init() {
   // compile every scene's shaders up front so entering a game doesn't stall for a moment
   for (const v of [hub, ...Object.values(games)]) renderer.compile(v.scene, v.camera)
   refreshScores()
-  // handy for debugging / automated checks
-  window.__lobby = { hub, games, input, live, motion, audio, get active() { return active }, startGame, leaveGame, renderer, renderUi }
   // no start screen: begin straight away. Audio starts suspended and is unlocked by the first click / key / button press.
   audio.autoStart()
   audio.setTrack('lobby')

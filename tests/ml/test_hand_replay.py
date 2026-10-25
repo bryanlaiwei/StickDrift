@@ -4,7 +4,6 @@ Needs the root uv environment (numpy, scipy, matplotlib, pillow): `uv sync`, the
 `uv run python -m unittest tests.ml.test_hand_replay`.
 """
 
-import csv
 import json
 import math
 import os
@@ -26,19 +25,8 @@ if HAS_DEPS:
     from ml.hand_replay.reconstruct import motion_from_capture, motion_from_frames, pick_game
     from ml.hand_replay.render import GIF_BUDGET_BYTES, RENDERER_VERSION
 
-REAL_SESSION = ROOT / "data" / "ultimate_data" / "Tremor" / "2026-10-18_02-38-26_lobby"
-CSV_TO_CAPTURE = {
-    "tgt_lx": "target_lx", "tgt_ly": "target_ly", "tgt_rx": "target_rx", "tgt_ry": "target_ry",
-    "reached_l": "on_l", "reached_r": "on_r",
-    "cur_lx": "cursor_lx", "cur_ly": "cursor_ly", "cur_rx": "cursor_rx", "cur_ry": "cursor_ry",
-}
-CORE = ("t", "trial", "phase", "lx", "ly", "rx", "ry", "tgt_lx", "tgt_ly", "tgt_rx", "tgt_ry",
-        "reached_l", "reached_r", "cur_lx", "cur_ly", "cur_rx", "cur_ry")
-MOTION = ("gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z")
-
-
 def frames(seconds, gyro=True, start=0.0, hz=60, tremor_hz=6.0):
-    """Frames shaped like LiveSession._keep_frame: sticks circle, the left hand has a target, a 6 Hz tremor."""
+    """Frames shaped like live._load_capture builds them: sticks circle, the left hand has a target, a 6 Hz tremor."""
     out = []
     for i in range(int(seconds * hz)):
         t = start + i / hz
@@ -58,30 +46,6 @@ def frames(seconds, gyro=True, start=0.0, hz=60, tremor_hz=6.0):
     return out
 
 
-def _cell(key, value):
-    if value in (None, ""):
-        return None
-    return value if key == "phase" else float(value)
-
-
-def capture_from_session(session: Path) -> dict:
-    """A recorded lobby session in the shape the API keeps in memory (tgt_* -> target_*, gyro only when measured)."""
-    meta = json.loads((session / "session.json").read_text(encoding="utf-8"))
-    capture = {game: {"frames": [], "events": []} for game in ("apple", "fish", "rat")}
-    for level in meta["levels"]:
-        path = session / level["folder"] / "controller_data.csv"
-        if not path.is_file():
-            continue
-        with path.open(newline="", encoding="utf-8") as handle:
-            for row in csv.DictReader(handle):
-                frame = {CSV_TO_CAPTURE.get(k, k): _cell(k, row.get(k)) for k in CORE}
-                if row.get("gyro_x"):
-                    frame.update({k: float(row[k]) for k in MOTION})
-                capture[level["level"]]["frames"].append(frame)
-    return capture
-
-
-@unittest.skipUnless(HAS_DEPS, "needs numpy, scipy, matplotlib and pillow (uv sync)")
 class MotionFromFramesTest(unittest.TestCase):
     def test_gyro_frames_tilt_and_shake(self):
         motion = motion_from_frames(frames(10), "apple")
@@ -134,14 +98,6 @@ class PickGameTest(unittest.TestCase):
         self.assertIsNone(pick_game(self.capture(apple=1)))
         self.assertIsNone(pick_game({}))
         self.assertIsNone(motion_from_capture({"rat": {"events": [{"type": "result"}]}}))
-
-    @unittest.skipUnless(REAL_SESSION.is_dir(), "recorded session not present")
-    def test_recorded_session_through_the_capture_path(self):
-        game, motion = motion_from_capture(capture_from_session(REAL_SESSION))
-        self.assertEqual(game, "apple")
-        self.assertTrue(motion.has_motion)
-        self.assertEqual(len(motion.time_s), 150)
-        self.assertGreater(motion.shake_cm.max(), 0.01)
 
 
 @unittest.skipUnless(HAS_DEPS, "needs numpy, scipy, matplotlib and pillow (uv sync)")

@@ -17,8 +17,3 @@ dependencies = [
 
 [tool.uv]
 package = false
-
-[dependency-groups]
-# matplotlib and scipy are main dependencies now (the API draws hand replays with them);
-# the group stays so `uv run --group study ...` keeps working.
-study = []

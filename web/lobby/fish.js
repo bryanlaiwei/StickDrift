@@ -24,7 +24,7 @@ const MAX_PTS = 700
 /** A random traceable shape across the water: wave / zigzag / loop / S-curve, randomly flipped. */
 export const KINDS = ['wave', 'zigzag', 'loop', 'scurve', 'arch', 'spiral', 'figure8', 'hairpin']
 
-export function makePath(leftToRight, forcedKind = null) {
+function makePath(leftToRight, forcedKind = null) {
   const kind = forcedKind || choice(KINDS)
   const x0 = -4.2, x1 = 4.2
   const flip = choice([-1, 1])

@@ -46,10 +46,3 @@ export function record(game, { score, stars }, player = playerId) {
   save(db)
   return { isNewBest, prevBest: prev.best, best: mine[game].best, stars: mine[game].stars, plays: mine[game].plays }
 }
-
-export const starText = (n) => '★'.repeat(n) + '☆'.repeat(Math.max(0, MAX_STARS - n))
-
-/** The score lines shown at the bottom of a results screen. */
-export function resultLines(score, stars, rec) {
-  return [`Score ${score}   ${starText(stars)}`, rec.isNewBest ? 'NEW HIGH SCORE!' : `High score ${rec.best}`]
-}
