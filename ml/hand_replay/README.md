@@ -4,7 +4,7 @@ Rebuilds the resident's hands moving the DualSense during a finished lobby visit
 
 ## How the API runs it
 
-When a lobby visit ends, the API (`backend/app/live.py`) runs this beside the visit report, in the same Python:
+When a lobby visit ends, the API (`backend/app/live/visit.py`) runs this beside the visit report, in the same Python:
 
 ```
 python -m ml.hand_replay.from_capture --out hands.gif < capture.json

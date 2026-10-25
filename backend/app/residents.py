@@ -10,10 +10,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from . import hand_replays, live
+from . import hand_replays
 from .auth import current_caregiver
 from .db import pool
 from .insights import add_model_concerns, analyze, review_from
+from .live.visit import save_unsaved_visits
 
 router = APIRouter(tags=["residents"])
 
@@ -67,13 +68,13 @@ class ResidentDetail(BaseModel):
 
 
 def _fetch_visits(conn, resident_id: UUID) -> List[dict]:
-    replay = hand_replays.meta_sql("s.session_id") if hand_replays.exists(conn) else "NULL::jsonb"
     rows = conn.execute(
         f"""SELECT s.session_id, s.started_at, s.completed_at, s.status, s.is_synthetic,
                   COALESCE(ss.metrics->'games', '{{}}'::jsonb) AS games,
                   ARRAY(SELECT jsonb_array_elements_text(COALESCE(ss.metrics->'games_finished', '[]'::jsonb)))
                     AS games_finished,
-                  ss.metrics->'tcn' AS tcn, ss.metrics->'visit' AS visit, {replay} AS hand_replay
+                  ss.metrics->'tcn' AS tcn, ss.metrics->'visit' AS visit,
+                  {hand_replays.meta_sql('s.session_id')} AS hand_replay
            FROM sessions s
            LEFT JOIN session_summaries ss ON ss.session_id = s.session_id
            WHERE s.participant_id = %s AND s.protocol_version LIKE 'lobby-%%'
@@ -87,7 +88,7 @@ def _fetch_visits(conn, resident_id: UUID) -> List[dict]:
 
 def _sweep():
     try:
-        live.save_unsaved_lobbies()
+        save_unsaved_visits()
     except Exception:
         pass  # a failed sweep must never block the caregiver's view; it retries on the next visit
 

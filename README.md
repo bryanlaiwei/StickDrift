@@ -86,15 +86,14 @@ The model is trained locally by the team, on a laptop, from the lobby visits we 
 
 ## 🚀 Running locally
 
-You need Node 20+, Python 3.9+ for the backend, Python 3.14 with [uv](https://docs.astral.sh/uv/) for the games and model, Chrome or Edge, and a [Tiger Data](https://www.tigerdata.com/) service.
+You need Node 20+, Python 3.9+ for the backend, Python 3.14 with [uv](https://docs.astral.sh/uv/) for the pattern model and hand replays, Chrome or Edge, and a [Tiger Data](https://www.tigerdata.com/) service.
 
-**1. Database.** Create a service in Tiger Console and copy its connection string. Apply both schemas (they are safe to re-run):
+**1. Database.** Create a service in Tiger Console and copy its connection string. The API applies `sql/schema.sql` when it starts (safe to re-run):
 
 ```bash
 cd backend
 cp .env.example .env               # set DATABASE_URL (and the other variables below)
-psql "$DATABASE_URL" -f sql/schema.sql
-psql "$DATABASE_URL" -f sql/auth_schema.sql
+psql "$DATABASE_URL" -f sql/schema.sql   # optional: the API also applies it at startup
 ```
 
 **2. Backend.**
@@ -113,7 +112,7 @@ uvicorn app.main:app --port 8000
 uv sync                            # numpy, torch, scipy, matplotlib, pillow, ...
 ```
 
-The API looks for `../.venv/bin/python`. On Windows that file does not exist, so set `STICKDRIFT_GAME_PYTHON` in `backend/.env` to the full path of `.venv\Scripts\python.exe`. Without this environment the visit is still saved, but it has no pattern scores and no hand replay.
+The API looks for `../.venv/bin/python`. On Windows that file does not exist, so set `STICKDRIFT_ML_PYTHON` in `backend/.env` to the full path of `.venv\Scripts\python.exe`. Without this environment the visit is still saved, but it has no pattern scores and no hand replay.
 
 **3. Web app.**
 
@@ -141,7 +140,7 @@ For the cross-laptop setup, each laptop runs its own API and web app against the
 | `GEMINI_API_KEY` | Enables the AI assistant and the PDF narrative; without it the rule-based and template text are used |
 | `GEMINI_MODEL` | Optional model override (default `gemini-3.8-flash`, with fallbacks) |
 | `CORS_ORIGINS` | Allowed web origins, comma separated (default `http://localhost:5173`) |
-| `STICKDRIFT_GAME_PYTHON` | Where the API finds the root uv environment's Python (visit report and hand replays; default `../.venv/bin/python`, on Windows set it to `.venv\Scripts\python.exe`) |
+| `STICKDRIFT_ML_PYTHON` | Where the API finds the root uv environment's Python (visit report and hand replays; default `../.venv/bin/python`, on Windows set it to `.venv\Scripts\python.exe`) |
 
 ### 🏋️ Training the pattern model
 
@@ -176,7 +175,7 @@ Data lives in Tiger Data (managed PostgreSQL with TimescaleDB), so it leaves the
 | `sessions`, `session_summaries` | One row per visit (`lobby-v1`) and its per-game, per-hand results |
 | `raw_samples` | Hypertable of in-game stick samples with target and in-game hand positions, tagged by game; the training data |
 | `live_sessions`, `live_samples`, `live_events` | Live sessions (state, token hash, samples, in-game events), cleared after a day; finished visits are copied to `sessions` and `raw_samples` first |
-| `session_hand_replays` | One reconstructed-hands GIF (under ~1.5 MB) per lobby visit, plus which game and window it shows; the API creates this table on first use |
+| `session_hand_replays` | One reconstructed-hands GIF (under ~1.5 MB) per lobby visit, plus which game and window it shows |
 
 From the fourth game visit with the controller, a resident's latest visits are compared with their own earlier ones.
 
@@ -186,8 +185,9 @@ From the fourth game visit with the controller, a resident's latest visits are c
 backend/                     FastAPI API (its own venv, backend/requirements.txt)
   app/main.py                App setup and health check
   app/auth.py                Resident and caregiver accounts, login sessions, access code
-  app/live.py                Live lobby sessions: ingest, saving visits, end-of-visit scoring
-  app/live_stream.py         LISTEN/NOTIFY hub and the caregiver WebSocket
+  app/live/                  Live lobby sessions: session.py (ingest and storage), visit.py (saving and scoring
+                             a finished visit), watch.py (caregiver reads), stream.py (WebSocket), routes.py
+  app/db.py                  Connection pool; applies sql/schema.sql at startup
   app/measurements.py        Per-hand reach, tracking and shake: the one definition, also used by ml/visit_report
   app/residents.py           Caregiver endpoints for residents and their visits
   app/insights.py            Personal baseline, concerns and recommended checks
@@ -195,7 +195,7 @@ backend/                     FastAPI API (its own venv, backend/requirements.txt
   app/clinician_report.py    Clinician PDF report
   app/gemini.py              The Gemini client shared by the assistant and the report
   app/hand_replays.py        Stores and serves each visit's reconstructed-hands GIF
-  sql/                       Tiger Data schema (schema.sql, auth_schema.sql)
+  sql/schema.sql             The Tiger Data schema (the only definition of it)
   scripts/                   Demo data and demo logins
 web/                         Website (React + Vite) and the browser lobby games
   src/                       Login, resident home, caregiver dashboard, live view, resident pages

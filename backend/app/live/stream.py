@@ -1,7 +1,7 @@
 """Push live sessions to caregivers over a WebSocket instead of polling.
 
-The resident's game posts to the API on the resident's own computer, and that
-API writes to TigerData (live.py). It also sends a Postgres NOTIFY on the
+The resident's lobby tab posts to an API process, which writes to Tiger Data
+(session.py). It also sends a Postgres NOTIFY on the
 `stickdrift_live` channel in the same transaction: small sample batches ride
 in the notification itself; big ones and state changes send only a pointer.
 
@@ -34,8 +34,10 @@ from uuid import UUID
 import psycopg
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from . import auth, live
-from .db import DATABASE_URL
+from .. import auth
+from ..db import DATABASE_URL
+from .session import ACTIVE, CHANNEL
+from .watch import samples_since, state
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["live"])
@@ -92,7 +94,7 @@ class Hub:
         while not self.stopping.is_set():
             try:
                 with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
-                    conn.execute(f"LISTEN {live.CHANNEL}")
+                    conn.execute(f"LISTEN {CHANNEL}")
                     backoff = 1.0
                     self.loop.call_soon_threadsafe(self._resync_all)  # anything missed while reconnecting
                     while not self.stopping.is_set():
@@ -148,7 +150,7 @@ class Hub:
         async with w.fetch_lock:
             if w.seq is None:
                 return
-            rows = await asyncio.to_thread(live.samples_since, UUID(w.live_id), w.seq, GAP_LIMIT)
+            rows = await asyncio.to_thread(samples_since, UUID(w.live_id), w.seq, GAP_LIMIT)
             fresh = [r for r in rows if r[0] > w.seq]
             if fresh:
                 w.seq = fresh[-1][0]
@@ -163,12 +165,12 @@ class Hub:
     async def _push_state(self, w: Watch):
         w.state_due = False
         try:
-            st = await asyncio.to_thread(live.state, UUID(w.live_id))
+            st = await asyncio.to_thread(state, UUID(w.live_id))
         except Exception:
             log.exception("Reading live state failed")
             return
         if st is not None:
-            w.playing = st["status"] in live.ACTIVE
+            w.playing = st["status"] in ACTIVE
             self._send(w, {"type": "state", **st})
 
     async def _refresh(self, w: Watch):
@@ -215,7 +217,7 @@ class Hub:
 
     def started(self, w: Watch, seq: int, status: str):
         """A viewer has its snapshot up to `seq`; begin streaming after it."""
-        w.playing = status in live.ACTIVE
+        w.playing = status in ACTIVE
         if w.seq is None:
             w.seq = seq
             early, w.early = w.early, []
@@ -256,11 +258,11 @@ async def live_socket(ws: WebSocket, live_id: UUID):
     try:
         # Subscribe first, then read: anything newer than the snapshot is already queued (duplicates are dropped
         # by seq in the browser).
-        st = await asyncio.to_thread(live.state, live_id)
+        st = await asyncio.to_thread(state, live_id)
         if st is None:
             await ws.close(code=4404)
             return
-        samples = await asyncio.to_thread(live.samples_since, live_id, 0, SNAPSHOT_LIMIT)
+        samples = await asyncio.to_thread(samples_since, live_id, 0, SNAPSHOT_LIMIT)
         await ws.send_text(_dump({"type": "snapshot", **st, "samples": samples}))
         hub.started(w, samples[-1][0] if samples else st["seq"], st["status"])
 

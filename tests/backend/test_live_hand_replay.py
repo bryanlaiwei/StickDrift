@@ -1,4 +1,4 @@
-"""The hand replay runs beside the visit report and never changes or delays it (backend/app/live.py).
+"""The hand replay runs beside the visit report and never changes or delays it (backend/app/live/visit.py).
 
 Needs the backend packages: run with the backend's Python, e.g.
 `backend\\.venv\\Scripts\\python -m unittest tests.backend.test_live_hand_replay` from the repository root.
@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 HAS_DEPS = all(find_spec(name) for name in ("fastapi", "psycopg_pool", "pydantic", "dotenv", "argon2"))
 if HAS_DEPS:
     os.environ.setdefault("DATABASE_URL", "postgresql://unused.invalid/stickdrift")
-    from backend.app import live
+    from backend.app.live import visit, watch
 
 REPORT = {
     "schema_version": 1,
@@ -44,10 +44,10 @@ def capture():
 @unittest.skipUnless(HAS_DEPS, "needs the backend packages (backend/requirements.txt)")
 class FinishVisitWithReplayTest(unittest.TestCase):
     def setUp(self):
-        self.session = live.LiveSession(uuid4(), "Test resident", False)
+        self.session = visit.LiveSession(uuid4(), "Test resident", False)
         self.session_id = uuid4()
         self.replays = []
-        real_start = live._start_hand_replay
+        real_start = visit._start_hand_replay
 
         def start(s, cap):
             replay = real_start(s, cap)
@@ -55,21 +55,21 @@ class FinishVisitWithReplayTest(unittest.TestCase):
             return replay
 
         patches = [
-            mock.patch.object(live, "_start_hand_replay", side_effect=start),
-            mock.patch.object(live, "_run_report", return_value=REPORT),
-            mock.patch.object(live, "_persist"),
-            mock.patch.object(live, "pool"),
+            mock.patch.object(visit, "_start_hand_replay", side_effect=start),
+            mock.patch.object(visit, "_run_report", return_value=REPORT),
+            mock.patch.object(visit, "persist"),
+            mock.patch.object(visit, "pool"),
         ]
         self.run_report, self.persist = patches[1].start(), patches[2].start()
         patches[0].start()
         patches[3].start()
-        self.attach = mock.patch.object(live, "_attach_report").start()
-        self.store = mock.patch.object(live.hand_replays, "store").start()
+        self.attach = mock.patch.object(visit, "_attach_report").start()
+        self.store = mock.patch.object(visit.hand_replays, "store").start()
         self.addCleanup(mock.patch.stopall)
 
     def finish(self, cap=None, session_id="default"):
         cap = capture() if cap is None else cap
-        live._finish_visit(self.session, cap, self.session_id if session_id == "default" else session_id)
+        visit._finish_visit(self.session, cap, self.session_id if session_id == "default" else session_id)
         return cap
 
     def join_replay(self):
@@ -87,7 +87,7 @@ class FinishVisitWithReplayTest(unittest.TestCase):
         self.persist.assert_called_with(self.session)
 
     def test_replay_failure_leaves_the_visit_alone(self):
-        with mock.patch.object(live, "_run_hand_replay", side_effect=RuntimeError("renderer crashed")):
+        with mock.patch.object(visit, "_run_hand_replay", side_effect=RuntimeError("renderer crashed")):
             cap = self.finish()
             self.join_replay()
         self.assert_visit_judged()
@@ -95,11 +95,11 @@ class FinishVisitWithReplayTest(unittest.TestCase):
         self.store.assert_not_called()
 
     def test_replay_timeout_leaves_the_visit_alone(self):
-        timeout = subprocess.TimeoutExpired(["python", "-m", "ml.hand_replay.from_capture"], live.REPLAY_TIMEOUT_S)
-        with mock.patch.object(live.subprocess, "run", side_effect=timeout) as run:
+        timeout = subprocess.TimeoutExpired(["python", "-m", "ml.hand_replay.from_capture"], visit.REPLAY_TIMEOUT_S)
+        with mock.patch.object(visit.subprocess, "run", side_effect=timeout) as run:
             self.finish()
             self.join_replay()
-        self.assertEqual(run.call_args.kwargs["timeout"], live.REPLAY_TIMEOUT_S)
+        self.assertEqual(run.call_args.kwargs["timeout"], visit.REPLAY_TIMEOUT_S)
         self.assertEqual(run.call_args.kwargs["env"]["MPLBACKEND"], "Agg")
         self.assert_visit_judged()
         self.store.assert_not_called()
@@ -112,7 +112,7 @@ class FinishVisitWithReplayTest(unittest.TestCase):
             release.wait(10)
             return GIF
 
-        with mock.patch.object(live, "_run_hand_replay", side_effect=slow_replay):
+        with mock.patch.object(visit, "_run_hand_replay", side_effect=slow_replay):
             self.finish()
             self.assert_visit_judged()
             self.assertTrue(self.replays[0].thread.is_alive())
@@ -122,15 +122,15 @@ class FinishVisitWithReplayTest(unittest.TestCase):
 
     def test_failed_store_is_only_logged(self):
         self.store.side_effect = RuntimeError("database refused")
-        with mock.patch.object(live, "_run_hand_replay", return_value=GIF):
+        with mock.patch.object(visit, "_run_hand_replay", return_value=GIF):
             self.finish()
             self.join_replay()
         self.assert_visit_judged()
 
     def test_replay_follows_a_visit_stored_from_the_report(self):
         new_id = uuid4()
-        with mock.patch.object(live, "_store_visit", return_value=new_id), \
-             mock.patch.object(live, "_run_hand_replay", return_value=GIF):
+        with mock.patch.object(visit, "_store_visit", return_value=new_id), \
+             mock.patch.object(visit, "_run_hand_replay", return_value=GIF):
             self.finish(session_id=None)
             self.join_replay()
         self.assertEqual(self.session.db_session_id, new_id)
@@ -138,45 +138,12 @@ class FinishVisitWithReplayTest(unittest.TestCase):
 
     def test_unsaved_visit_drops_the_replay(self):
         self.run_report.side_effect = RuntimeError("visit report failed")
-        with mock.patch.object(live, "_run_hand_replay", return_value=GIF):
+        with mock.patch.object(visit, "_run_hand_replay", return_value=GIF):
             self.finish(session_id=None)
             self.join_replay()
         self.assertEqual(self.session.status, "failed")
         self.assertEqual(self.session.error, "visit report failed")
         self.store.assert_not_called()
-
-
-@unittest.skipUnless(HAS_DEPS, "needs the backend packages (backend/requirements.txt)")
-class TableOnFirstUseTest(unittest.TestCase):
-    def setUp(self):
-        hr = live.hand_replays
-        saved = (hr._exists, hr._looked_at, hr._create_failed_at)
-        hr._exists, hr._looked_at, hr._create_failed_at = False, float("-inf"), float("-inf")
-
-        def restore():
-            hr._exists, hr._looked_at, hr._create_failed_at = saved
-
-        self.addCleanup(restore)
-        self.pool = mock.patch.object(hr, "pool").start()
-        self.addCleanup(mock.patch.stopall)
-
-    def test_a_read_that_found_no_table_does_not_block_creating_it(self):
-        reader = mock.MagicMock()
-        reader.execute.return_value.fetchone.return_value = {"ok": False}
-        self.assertFalse(live.hand_replays.exists(reader))
-        self.assertTrue(live.hand_replays.ensure_table())
-        created = self.pool.connection.return_value.__enter__.return_value.execute
-        created.assert_called_once_with(live.hand_replays.TABLE_SQL)
-        self.assertTrue(live.hand_replays.exists(reader))
-        reader.execute.assert_called_once()
-
-    def test_a_refused_create_is_retried_later_not_on_every_insert(self):
-        self.pool.connection.side_effect = RuntimeError("permission denied")
-        self.assertFalse(live.hand_replays.ensure_table())
-        self.assertFalse(live.hand_replays.ensure_table())
-        self.assertEqual(self.pool.connection.call_count, 1)
-        with self.assertRaises(RuntimeError):
-            live.hand_replays.store(uuid4(), b"GIF89a", {})
 
 
 @unittest.skipUnless(HAS_DEPS, "needs the backend packages (backend/requirements.txt)")
@@ -187,16 +154,16 @@ class ReplayPendingTest(unittest.TestCase):
         return {**base, **over}
 
     def test_pending_while_scoring_and_just_after(self):
-        self.assertTrue(live._replay_pending(self.row(status="scoring", ended_ago_s=None)))
-        self.assertTrue(live._replay_pending(self.row()))
+        self.assertTrue(watch._replay_pending(self.row(status="scoring", ended_ago_s=None)))
+        self.assertTrue(watch._replay_pending(self.row()))
 
     def test_not_pending(self):
-        self.assertFalse(live._replay_pending(self.row(hand_replay={"game": "apple"})))
-        self.assertFalse(live._replay_pending(self.row(levels=["apples"])))
-        self.assertFalse(live._replay_pending(self.row(ended_ago_s=live.REPLAY_TIMEOUT_S + 60)))
-        self.assertFalse(live._replay_pending(self.row(db_session_id=None)))
-        self.assertFalse(live._replay_pending(self.row(status="scoring", stale=True)))
-        self.assertFalse(live._replay_pending(self.row(status="failed")))
+        self.assertFalse(watch._replay_pending(self.row(hand_replay={"game": "apple"})))
+        self.assertFalse(watch._replay_pending(self.row(levels=["apples"])))
+        self.assertFalse(watch._replay_pending(self.row(ended_ago_s=visit.REPLAY_TIMEOUT_S + 60)))
+        self.assertFalse(watch._replay_pending(self.row(db_session_id=None)))
+        self.assertFalse(watch._replay_pending(self.row(status="scoring", stale=True)))
+        self.assertFalse(watch._replay_pending(self.row(status="failed")))
 
 
 if __name__ == "__main__":
