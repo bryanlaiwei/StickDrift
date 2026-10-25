@@ -53,7 +53,7 @@ Visits are stored only in Tiger Data. The API writes no recording files; the pat
 - **Live view** (`/caregiver/live/:id`). Each in-game hand against its target, a rolling 20-second chart (distance from target or stick tilt), and measurements updating as the resident plays.
 - **Resident page** (`/caregiver/residents/:id`):
   - **Overview.** Status banner and any potential concerns. Each concern shows what changed, what to check first, possible everyday reasons, and its research basis.
-  - **Trends.** One line per hand across visits: time to pick an apple, time on the fishing lane, time to slam a rat (and earlier sessions when the resident has them).
+  - **Trends.** One line per hand across visits: time to pick an apple, time on the fishing lane, time to slam a rat.
   - **Game visits.** The latest visit as one card per game, the pattern chart for that visit, and a table of every visit. Visits recorded since hand replays were added also have a short **reconstructed hands** GIF (the 3D hands and controller during the busiest few seconds, shake drawn ×10); it is also shown at the end of the live view.
   - **Ask the assistant.** Questions about this resident, answered from their recorded measurements.
   - **Clinician report (PDF).** A one-click summary of visits, per-hand results, pattern scores and concerns for a nurse or doctor (`backend/app/clinician_report.py`). Gemini writes the short narrative under the same checks as the assistant, with a template fallback.
@@ -103,8 +103,7 @@ psql "$DATABASE_URL" -f sql/auth_schema.sql
 cd backend
 python3 -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m scripts.seed_synthetic   # optional: two demo residents with SYNTHETIC history
-python -m scripts.seed_accounts   # optional: logins for existing residents + a caregiver account (random passwords, printed once)
+python -m scripts.create_caregiver   # optional: a caregiver login (random password, printed once)
 uvicorn app.main:app --port 8000
 ```
 
@@ -129,7 +128,7 @@ The Vite dev server proxies `/api` (including the live WebSocket) to `http://loc
 **4. Use it.**
 
 - Residents sign up at `/signup` and open the lobby from their home page.
-- Caregivers register at `/caregiver/signup` with the access code from `CAREGIVER_INVITE_CODE`, or use the account from `scripts/seed_accounts.py`.
+- Caregivers register at `/caregiver/signup` with the access code from `CAREGIVER_INVITE_CODE`, or use the account from `scripts/create_caregiver.py`.
 
 For the cross-laptop setup, each laptop runs its own API and web app against the same `DATABASE_URL`.
 
@@ -179,7 +178,7 @@ Data lives in Tiger Data (managed PostgreSQL with TimescaleDB), so it leaves the
 | `live_sessions`, `live_samples`, `live_events` | Live sessions (state, token hash, samples, in-game events), cleared after a day; finished visits are copied to `sessions` and `raw_samples` first |
 | `session_hand_replays` | One reconstructed-hands GIF (under ~1.5 MB) per lobby visit, plus which game and window it shows; the API creates this table on first use |
 
-From the fourth game visit with the controller, a resident's latest visits are compared with their own earlier ones. The multi-day histories of the demo residents are **synthetic and labelled as such**.
+From the fourth game visit with the controller, a resident's latest visits are compared with their own earlier ones.
 
 ## 🗂️ Project layout
 

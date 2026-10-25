@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api, type Finding, type GameSession, type Insights, type ResidentDetail as Detail } from '../api'
+import { api, type GameSession, type Insights, type ResidentDetail as Detail } from '../api'
 import { Assistant } from '../components/Assistant'
 import { GameVisits } from '../components/GameVisits'
 import { ConcernCard, RiskAlert, RiskBadge } from '../components/Insights'
 import { RatPoints } from '../components/LiveCharts'
 import { LiveNow } from '../components/LiveNow'
-import { SessionTable } from '../components/SessionTable'
 import { TabPanel, Tabs } from '../components/Tabs'
 import { VisitPatterns } from '../components/VisitPatterns'
-import { GameTrendCharts, TrendCharts } from '../components/TrendCharts'
+import { GameTrendCharts } from '../components/TrendCharts'
 import { formatDateTime } from '../format'
 
 function ReportButton({ id }: { id: string }) {
@@ -46,7 +45,7 @@ function ReportButton({ id }: { id: string }) {
   )
 }
 
-type TabKey = 'overview' | 'trends' | 'games' | 'ask' | 'history'
+type TabKey = 'overview' | 'trends' | 'games' | 'ask'
 
 export default function ResidentDetail() {
   const { id = '' } = useParams()
@@ -103,8 +102,7 @@ export default function ResidentDetail() {
           </h1>
           <p className="muted">
             {data.dominant_hand === 'unknown' ? 'Dominant hand not set' : `${data.dominant_hand}-handed`} ·{' '}
-            {data.sessions.length + data.game_sessions.length} sessions
-            {insights.synthetic && <span className="badge badge-synthetic">Includes simulated data</span>}
+            {data.game_sessions.length} {data.game_sessions.length === 1 ? 'visit' : 'visits'}
           </p>
         </div>
         <ReportButton id={data.participant_id} />
@@ -122,15 +120,12 @@ export default function ResidentDetail() {
           { key: 'trends', label: 'Trends' },
           { key: 'games', label: 'Game visits', badge: data.game_sessions.length || null },
           { key: 'ask', label: 'Ask the assistant' },
-          ...(data.sessions.length > 0
-            ? [{ key: 'history' as const, label: 'Earlier sessions', badge: data.sessions.length }]
-            : []),
         ]}
       />
 
       <TabPanel>
         {tab === 'overview' && <Overview data={data} insights={insights} />}
-        {tab === 'trends' && <Trends data={data} insights={insights} />}
+        {tab === 'trends' && <Trends visits={data.game_sessions} />}
         {tab === 'games' && <GameVisits visits={data.game_sessions} name={data.display_name} />}
         {tab === 'ask' && (
           <Assistant
@@ -144,55 +139,17 @@ export default function ResidentDetail() {
             ]}
           />
         )}
-        {tab === 'history' && (
-          <section className="panel">
-            <h2>Earlier sessions</h2>
-            <p className="muted panel-lede">Reaction-test sessions recorded before the game lobby, kept for comparison.</p>
-            <SessionTable sessions={data.sessions} />
-          </section>
-        )}
       </TabPanel>
     </main>
   )
 }
 
-function glance(f: Finding | undefined) {
-  if (!f) return { value: '—', delta: '', bad: false }
-  return { value: f.latest_text, delta: `usual ${f.baseline_text}`, bad: f.flagged }
-}
-
 function Overview({ data, insights }: { data: Detail; insights: Insights }) {
   const latestGame = data.game_sessions[0]
-  const by = new Map(insights.findings.map((f) => [f.key, f]))
-  const rows: { label: string; l?: Finding; r?: Finding }[] = [
-    { label: 'Response time', l: by.get('left_latency'), r: by.get('right_latency') },
-    { label: 'Accuracy', l: by.get('left_accuracy'), r: by.get('right_accuracy') },
-  ]
 
   return (
     <>
       {latestGame && <LatestJudgement visits={data.game_sessions} />}
-      {insights.status === 'ok' && (
-        <section className="glance" aria-label="Latest session compared with usual">
-          {rows.map((row) => (
-            <div className="glance-card" key={row.label}>
-              <h3>{row.label}</h3>
-              {(['l', 'r'] as const).map((k) => {
-                const g = glance(row[k])
-                return (
-                  <p key={k} className={g.bad ? 'is-flagged' : ''}>
-                    <i style={{ background: `var(--hand-${k === 'l' ? 'left' : 'right'})` }} aria-hidden />
-                    <span className="sr-only">{k === 'l' ? 'Left' : 'Right'}</span>
-                    <strong>{g.value}</strong>
-                    <span className="muted">{g.delta}</span>
-                  </p>
-                )
-              })}
-            </div>
-          ))}
-        </section>
-      )}
-
       {insights.concerns.length > 0 ? (
         <section id="concerns" aria-label="Potential health concerns">
           <p className="muted section-note">{insights.disclaimer}</p>
@@ -229,32 +186,11 @@ function LatestJudgement({ visits }: { visits: GameSession[] }) {
   )
 }
 
-type TrendMode = 'games' | 'earlier'
-
-function Trends({ data, insights }: { data: Detail; insights: Insights }) {
-  const modes = [
-    { key: 'games' as const, label: 'Game visits', badge: data.game_sessions.length },
-    { key: 'earlier' as const, label: 'Earlier sessions', badge: data.sessions.length },
-  ].filter((m) => m.badge > 0)
-  const [mode, setMode] = useState<TrendMode>(modes[0]?.key ?? 'earlier')
-
+function Trends({ visits }: { visits: GameSession[] }) {
   return (
     <section className="panel">
-      {modes.length > 1 && <Tabs variant="pills" label="Which game" value={mode} onChange={setMode} items={modes} />}
-      {mode === 'games' ? (
-        <>
-          <p className="muted panel-lede">Each point is one visit to the game lobby, oldest on the left.</p>
-          <GameTrendCharts visits={data.game_sessions} />
-        </>
-      ) : (
-        <>
-          <p className="muted panel-lede">
-            Each point is one session. The dashed line is their usual level; a red ring marks a reading that moved
-            enough to count as a change.
-          </p>
-          <TrendCharts sessions={data.sessions} insights={insights} />
-        </>
-      )}
+      <p className="muted panel-lede">Each point is one visit to the game lobby, oldest on the left.</p>
+      <GameTrendCharts visits={visits} />
     </section>
   )
 }

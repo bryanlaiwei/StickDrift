@@ -36,20 +36,19 @@ def visit(days_ago, left_reach=1.0, right_reach=1.0, lane=0.8, keyboard=False, s
 class LobbyBaselineTest(unittest.TestCase):
     def test_needs_four_controller_visits(self):
         visits = [visit(i) for i in range(3)] + [visit(9, keyboard=True)]
-        out = insights.analyze_lobby(visits)
+        out = insights.analyze(visits)
         self.assertEqual(out["status"], "insufficient")
-        self.assertEqual(out["usable_sessions"], 3)
+        self.assertEqual(out["usable_visits"], 3)
         self.assertIn("3 of 4", out["summary"])
 
     def test_steady_visits_raise_nothing(self):
-        out = insights.analyze_lobby([visit(i) for i in range(6)])
+        out = insights.analyze([visit(i) for i in range(6)])
         self.assertEqual(out["status"], "ok")
         self.assertEqual(out["risk"], "none")
-        self.assertEqual(out["source"], "lobby")
 
     def test_one_slower_hand_is_a_one_sided_change(self):
         visits = [visit(0, left_reach=1.6), visit(1, left_reach=1.5)] + [visit(i) for i in range(2, 7)]
-        out = insights.analyze_lobby(visits)
+        out = insights.analyze(visits)
         self.assertEqual([c["id"] for c in out["concerns"]], ["one_sided_left"])
         self.assertEqual(out["concerns"][0]["level"], "check")  # persisted across both recent visits
         flagged = [f for f in out["findings"] if f["flagged"]]
@@ -58,28 +57,18 @@ class LobbyBaselineTest(unittest.TestCase):
 
     def test_both_hands_worse_is_general(self):
         visits = [visit(0, left_reach=1.6, right_reach=1.6)] + [visit(i) for i in range(1, 6)]
-        out = insights.analyze_lobby(visits)
+        out = insights.analyze(visits)
         self.assertEqual([c["id"] for c in out["concerns"]], ["general_slowing"])
 
     def test_small_changes_do_not_count(self):
         visits = [visit(0, left_reach=1.1, lane=0.75)] + [visit(i) for i in range(1, 6)]
-        self.assertEqual(insights.analyze_lobby(visits)["risk"], "none")
-
-    def test_visits_are_the_baseline_and_old_sessions_only_stand_in(self):
-        session = {"session_id": uuid4(), "status": "completed", "quality": "good", "is_synthetic": True,
-                   "left_median_latency_ms": 500, "right_median_latency_ms": 500, "left_correct": 10,
-                   "left_valid": 12, "right_correct": 10, "right_valid": 12, "both_correct": 10,
-                   "both_valid": 12, "enjoyment": 4}
-        sessions = [dict(session, session_id=uuid4()) for _ in range(5)]
-        self.assertEqual(insights.resident_insights(sessions, [visit(i) for i in range(5)])["source"], "lobby")
-        self.assertEqual(insights.resident_insights(sessions, [visit(0)])["source"], "sessions")
-        self.assertEqual(insights.resident_insights([], [visit(0)])["source"], "lobby")
+        self.assertEqual(insights.analyze(visits)["risk"], "none")
 
 
 class ModelConcernTest(unittest.TestCase):
     def concerns(self, *scores):
         visits = [visit(i, scores={"parkinson": s, "stroke": 10, "essential_tremor": 10}) for i, s in enumerate(scores)]
-        base = insights.analyze_lobby(visits)
+        base = insights.analyze(visits)
         return insights.add_model_concerns(base, visits)["concerns"]
 
     def test_one_high_visit_is_only_watch(self):
@@ -105,8 +94,8 @@ class ModelConcernTest(unittest.TestCase):
 @unittest.skipUnless(assistant, "needs the backend packages (backend/requirements.txt)")
 class AssistantTest(unittest.TestCase):
     def profile(self, visits):
-        ins = insights.add_model_concerns(insights.resident_insights([], visits), visits)
-        return {"display_name": "Ada", "dominant_hand": "right", "insights": ins, "sessions": [],
+        ins = insights.add_model_concerns(insights.analyze(visits), visits)
+        return {"display_name": "Ada", "dominant_hand": "right", "insights": ins,
                 "game_sessions": visits, "review": insights.review_from(ins)}
 
     def test_every_condition_name_is_refused(self):

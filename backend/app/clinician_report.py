@@ -29,10 +29,9 @@ from reportlab.lib.units import inch
 from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from . import gemini
-from .assistant import baseline_unit, build_facts, game_parts, names_condition, unverified
+from .assistant import build_facts, game_parts, names_condition, unverified
 from .auth import current_caregiver
 from .db import pool
-from .insights import fmt
 from .residents import resident_profile
 
 log = logging.getLogger(__name__)
@@ -53,15 +52,15 @@ Register and structure
 - Separate observation from interpretation. "observations" contain only measured facts and comparisons. \
 Interpretation appears only in "irregularities" and "considerations", and is always hedged.
 - Be objective, specific and measurable: state the measure, the value, the resident's own usual value, the \
-direction and size of the change, and the number of sessions behind it. No adjectives such as "alarming", \
+direction and size of the change, and the number of visits behind it. No adjectives such as "alarming", \
 "poor", "worrying" or "excellent". No emotive or judgemental language.
 - Lead with the most important finding. Short sentences, active voice, past tense for what was measured and \
 present tense for what it may indicate. Plain words a clinician can scan in under a minute.
 - Use graded hedging for interpretation and match it to the evidence: "was observed" (measured), \
 "is consistent with" (two or more measures agree and the change persisted), "may reflect" (one measure or one \
-session), "cannot be determined from these data" (insufficient). Never use "proves" or "confirms".
+visit), "cannot be determined from these data" (insufficient). Never use "proves" or "confirms".
 - Name what the data cannot show. State that comparison is against the resident's own baseline (not a \
-population norm) and flag any simulated data.
+population norm) and say when visits were played with the keyboard.
 
 Hard rules
 - Use ONLY the FACTS block. Quote numbers exactly as written there (for example 0.82 s, 75%, -2 pts). Do not \
@@ -83,7 +82,7 @@ SCHEMA = {
     "type": "OBJECT",
     "properties": {
         "summary": {"type": "STRING", "description": "2-3 sentence bottom line, most important finding first."},
-        "data_description": {"type": "STRING", "description": "What was recorded, sessions used, baseline definition."},
+        "data_description": {"type": "STRING", "description": "What was recorded, visits used, baseline definition."},
         "observations": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
             "measure": {"type": "STRING"},
             "statement": {"type": "STRING", "description": "Objective: value, usual value, change, direction."}},
@@ -92,7 +91,7 @@ SCHEMA = {
             "title": {"type": "STRING"},
             "description": {"type": "STRING", "description": "What differed from the usual pattern, with numbers."},
             "interpretation": {"type": "STRING", "description": "Hedged, non-diagnostic statement of what it may reflect."},
-            "evidence_strength": {"type": "STRING", "enum": ["single session", "repeated across sessions", "limited data"]},
+            "evidence_strength": {"type": "STRING", "enum": ["single visit", "repeated across visits", "limited data"]},
             "possible_contributors": {"type": "ARRAY", "items": {"type": "STRING"}}},
             "required": ["title", "description", "interpretation", "evidence_strength", "possible_contributors"]}},
         "limitations": {"type": "ARRAY", "items": {"type": "STRING"}},
@@ -148,9 +147,9 @@ def _template_draft(p: dict) -> dict:
         games = [g for g in p.get("game_sessions", []) if g["games"]]
         if not games:
             return {"summary": ins["summary"],
-                    "data_description": f"{_n(ins['usable_sessions'], 'usable ' + baseline_unit(ins))} on record.",
+                    "data_description": "No game visits are on record yet.",
                     "observations": [], "irregularities": [],
-                    "limitations": [f"A personal baseline needs at least 4 usable {baseline_unit(ins)}s."],
+                    "limitations": ["A personal baseline needs at least 4 game visits with the controller."],
                     "considerations": ["Consider generating this report again after more visits are recorded."]}
         latest = next((g for g in games if not g["is_synthetic"]), games[0]) if games else None
         observations = [{"measure": f"{name} ({_fmt_when(latest['started_at'])})", "statement": text.capitalize() + "."}
@@ -163,17 +162,16 @@ def _template_draft(p: dict) -> dict:
                 "limitations": ["A personal baseline needs at least 4 game visits with the controller, so changes "
                                 "are not flagged yet."],
                 "considerations": ["Consider comparing left and right hands across the visits listed below."]}
-    unit = baseline_unit(ins)
     return {
         "summary": ins["summary"],
-        "data_description": f"The latest {unit} was compared with the median of {ins['baseline_sessions']} "
-                            f"earlier {unit}s from the same resident.",
+        "data_description": f"The latest game visit was compared with the median of {ins['baseline_visits']} "
+                            "earlier game visits from the same resident.",
         "observations": [{"measure": f["label"], "statement": f["text"]} for f in ins["findings"]],
         "irregularities": [{
             "title": c["title"], "description": c["summary"] + " " + " ".join(c["evidence"]),
             "interpretation": "These measurements differ from the resident's usual pattern; the cause cannot be "
                               "determined from these data.",
-            "evidence_strength": "repeated across sessions" if c["level"] == "check" else "single session",
+            "evidence_strength": "repeated across visits" if c["level"] == "check" else "single visit",
             "possible_contributors": c["possible_contributors"]} for c in ins["concerns"]],
         "limitations": [],
         "considerations": [x for c in ins["concerns"] for x in c["recommended_checks"]],
@@ -206,7 +204,7 @@ MUTED = colors.HexColor("#5b6773")
 ACCENT = colors.HexColor("#1f5f8b")
 RULE = colors.HexColor("#c9d1d9")
 # hands match the games and the site: red = left stick, blue = right stick
-RED, BLUE, GREEN = colors.HexColor("#e02424"), colors.HexColor("#2a78d6"), colors.HexColor("#3b8a5a")
+RED, BLUE = colors.HexColor("#e02424"), colors.HexColor("#2a78d6")
 
 SS = getSampleStyleSheet()
 BODY = ParagraphStyle("body", parent=SS["BodyText"], fontName="Helvetica", fontSize=9.5, leading=13,
@@ -246,8 +244,7 @@ def _localize(p: dict, tz: tzinfo) -> dict:
     def conv(rows):
         return [{**r, "started_at": r["started_at"].astimezone(tz)} if hasattr(r["started_at"], "astimezone") else r
                 for r in rows]
-    return {**p, "sessions": conv(p["sessions"]),
-            "game_sessions": conv(p.get("game_sessions", []))}
+    return {**p, "game_sessions": conv(p.get("game_sessions", []))}
 
 
 def _zone(name: Optional[str]) -> tzinfo:
@@ -260,9 +257,8 @@ def _zone(name: Optional[str]) -> tzinfo:
     return timezone.utc
 
 
-def _chart(title: str, series: List[tuple], baseline: Optional[float], yfmt: str,
-           xlabel: str = "Session (oldest to newest)") -> Drawing:
-    """series: [(name, [(x, y), ...], color)]; x is the session or visit number."""
+def _chart(title: str, series: List[tuple], yfmt: str, xlabel: str) -> Drawing:
+    """series: [(name, [(x, y), ...], color)]; x is the visit number."""
     w, h = 250, 150
     d = Drawing(w, h + 18)
     d.add(String(0, h + 6, title, fontName="Helvetica-Bold", fontSize=8.5, fillColor=INK))
@@ -272,19 +268,14 @@ def _chart(title: str, series: List[tuple], baseline: Optional[float], yfmt: str
         d.add(String(10, h / 2, "No data yet", fontSize=8, fillColor=MUTED))
         return d
     lo, hi = min(pts), max(pts)
-    if baseline is not None:
-        lo, hi = min(lo, baseline), max(hi, baseline)
     pad = (hi - lo) * 0.2 or 0.1
     xs = [x for _, s, _ in series for x, _ in s]
     lp = LinePlot()
     lp.x, lp.y, lp.width, lp.height = 38, 28, w - 50, h - 52
-    lp.data = [s for _, s, _ in series] + ([[(min(xs), baseline), (max(xs), baseline)]] if baseline is not None else [])
+    lp.data = [s for _, s, _ in series]
     for i, (_, _, c) in enumerate(series):
         lp.lines[i].strokeColor, lp.lines[i].strokeWidth = c, 1.6
         lp.lines[i].symbol = makeMarker("FilledCircle", size=4, fillColor=c, strokeColor=c)
-    if baseline is not None:
-        k = len(series)
-        lp.lines[k].strokeColor, lp.lines[k].strokeWidth, lp.lines[k].strokeDashArray = MUTED, 0.8, [3, 2]
     lp.yValueAxis.valueMin, lp.yValueAxis.valueMax = max(0, lo - pad), hi + pad
     lp.yValueAxis.labelTextFormat = yfmt
     lp.yValueAxis.labels.fontSize = lp.xValueAxis.labels.fontSize = 7
@@ -296,7 +287,7 @@ def _chart(title: str, series: List[tuple], baseline: Optional[float], yfmt: str
     d.add(String(lp.x + 20, 6, xlabel, fontSize=7, fillColor=MUTED))
     lg = Legend()
     lg.x, lg.y, lg.fontSize, lg.alignment = lp.x, h - 2, 7, "right"
-    lg.colorNamePairs = [(c, n) for n, _, c in series] + ([(MUTED, "Usual")] if baseline is not None else [])
+    lg.colorNamePairs = [(c, n) for n, _, c in series]
     lg.dxTextSpace, lg.deltax, lg.deltay, lg.columnMaximum = 3, 48, 9, 1
     d.add(lg)
     return d
@@ -363,7 +354,6 @@ def _per_hand(rows: List[dict], get) -> List[tuple]:
 
 def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo = timezone.utc) -> bytes:
     ins = p["insights"]
-    done = [s for s in reversed(p["sessions"]) if s["status"] == "completed"]
     games = [g for g in p.get("game_sessions", []) if g["games"]]  # newest first
     keyboard = sum(1 for g in games if g["is_synthetic"])
     now = datetime.now(tz)
@@ -375,16 +365,12 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
     el = [P("Movement Activity Data Summary", H1),
           P("Prepared for clinician review. Descriptive only; no diagnosis is made.", SMALL), Spacer(1, 6)]
 
-    starts = [x["started_at"] for x in done + games]
+    starts = [x["started_at"] for x in games]
     period = f"{_fmt_date(min(starts))} to {_fmt_date(max(starts))}" if starts else "no recorded activity yet"
     activity = [_n(len(games), "game visit")] if games else []
-    if p["sessions"]:
-        activity.append(_n(len(done), "reaction-test session"))
     if ins["status"] == "ok":
-        activity.append(f"baseline from {_n(ins['usable_sessions'], baseline_unit(ins))}")
-    if ins["synthetic"]:
-        synth = "Yes. Some or all data are simulated and not from a real person."
-    elif keyboard:
+        activity.append(f"baseline from {_n(ins['usable_visits'], 'game visit')}")
+    if keyboard:
         synth = f"No. {keyboard} of {_n(len(games), 'game visit')} used keyboard input, not the controller."
     else:
         synth = "No"
@@ -422,25 +408,6 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
         el.append(P("No measurements moved beyond the thresholds used to flag a change."))
 
     charts, notes = [], []
-    if done:
-        left = [(i + 1, s["left_median_latency_ms"] / 1000) for i, s in enumerate(done)
-                if s["left_median_latency_ms"] is not None]
-        right = [(i + 1, s["right_median_latency_ms"] / 1000) for i, s in enumerate(done)
-                 if s["right_median_latency_ms"] is not None]
-
-        def accs(c, v):
-            return [(i + 1, 100 * s[c] / s[v]) for i, s in enumerate(done) if s[c] is not None and s[v]]
-
-        by = {f["key"]: f for f in ins["findings"]}
-        base = by["left_latency"]["baseline"] / 1000 if "left_latency" in by else None
-        charts += [_chart("Reaction test: median response time (s)", [("Left", left, RED), ("Right", right, BLUE)],
-                          base, "%.2f"),
-                   _chart("Reaction test: accuracy (% correct)", [("Left", accs("left_correct", "left_valid"), RED),
-                          ("Right", accs("right_correct", "right_valid"), BLUE),
-                          ("Both", accs("both_correct", "both_valid"), GREEN)], None, "%.0f")]
-        if base is not None:
-            notes.append("Dashed line: the resident's usual left-hand response time (median of earlier sessions).")
-
     # lobby games: controller visits only, oldest first, one chart per game's headline measure
     real = [g for g in reversed(games) if not g["is_synthetic"]]
     hand = lambda r, game, side: (((r["games"].get(game) or {}).get("hands") or {}).get(side) or {})
@@ -452,7 +419,7 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
         series = _per_hand(rows, lambda r, side: None if hand(r, game, side).get(key) is None
                            else hand(r, game, side)[key] * scale)
         if any(pts for _, pts, _ in series):
-            charts.append(_chart(title, series, None, yfmt, "Visit with this game (oldest to newest)"))
+            charts.append(_chart(title, series, yfmt, "Visit with this game (oldest to newest)"))
     if games:
         notes.append("Game charts: each point is one visit." + (" Keyboard visits are left out." if keyboard else ""))
 
@@ -466,7 +433,7 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
         el.append(P("No measurements to chart yet."))
 
     el.append(P("6. Recorded activity (most recent first)", H2))
-    if not (games or p["sessions"]):
+    if not games:
         el.append(P("Nothing has been recorded for this resident yet."))
     if games:
         rows = [[P(h, CELLB) for h in ("Date", "Games", "Apple Picking", "Harbour Fishing", "Rat Catching", "Input")]]
@@ -478,25 +445,10 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
         shown = f", latest {min(len(games), 12)} shown" if len(games) > 12 else ""
         el += [P(f"Game visits ({len(games)}{shown})", TITLE),
                _tbl(rows, [1.15 * inch, 0.55 * inch] + [(W - 2.45 * inch) / 3] * 3 + [0.75 * inch]), Spacer(1, 6)]
-    if p["sessions"]:
-        rows = [[P(h, CELLB) for h in ("Date", "Status/quality", "Left RT", "Right RT", "Left acc.", "Right acc.", "Both acc.")]]
-        for s in p["sessions"][:10]:
-            a = lambda c, v: f"{round(100 * s[c] / s[v])}%" if s[c] is not None and s[v] else "-"
-            ms = lambda k: fmt("latency", s[k]) if s[k] is not None else "-"
-            rows.append([P(_fmt_date(s["started_at"]) + (" (sim.)" if s.get("is_synthetic") else ""), CELL),
-                         P(f"{s['status']}/{s['quality'] or '-'}", CELL),
-                         P(ms("left_median_latency_ms"), CELL), P(ms("right_median_latency_ms"), CELL),
-                         P(a("left_correct", "left_valid"), CELL), P(a("right_correct", "right_valid"), CELL),
-                         P(a("both_correct", "both_valid"), CELL)])
-        el += [P(f"Reaction-test sessions ({len(p['sessions'])})", TITLE),
-               _tbl(rows, [1.35 * inch, 1.1 * inch] + [(W - 2.45 * inch) / 5] * 5)]
-
     lim = list(draft["limitations"]) + [
         "Comparison is against this resident's own earlier visits, not a population norm.",
         "Controller input reflects thumb movement and attention during a game; it cannot identify a cause.",
         "Results can be affected by tiredness, pain, medication, vision, mood, seating and how the controller was held."]
-    if ins["synthetic"]:
-        lim.append("Some data are simulated for demonstration and must not be read as a real person's results.")
     el += [P("7. Limitations", H2)] + bullets(lim)
     el += [P("8. Points for clinician consideration", H2)]
     el += bullets(draft["considerations"] or ["No specific items. Continue routine observation."])

@@ -54,7 +54,6 @@ export function RiskAlert({
         </strong>
         <p>
           {insights.concerns.map((c) => c.title).join(' · ')}
-          {insights.synthetic && <span className="risk-alert-note"> · based on simulated data</span>}
         </p>
       </div>
       {onSeeDetails && (

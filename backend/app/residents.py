@@ -1,7 +1,7 @@
 """Caregiver read endpoints for residents' history and performance.
 
 Residents do not get a history view; only caregivers see results. Insights compare
-the latest game visits with the resident's own earlier visits (`insights.resident_insights`)
+the latest game visits with the resident's own earlier visits (`insights.analyze`)
 and add the pattern model's judgement of their latest scored game visits.
 """
 from typing import Any, List, Optional
@@ -13,29 +13,9 @@ from pydantic import BaseModel
 from . import hand_replays, live
 from .auth import current_caregiver
 from .db import pool
-from .insights import add_model_concerns, resident_insights, review_from
+from .insights import add_model_concerns, analyze, review_from
 
 router = APIRouter(tags=["residents"])
-
-
-class SessionSummary(BaseModel):
-    session_id: UUID
-    started_at: Any
-    completed_at: Optional[Any]
-    status: str
-    quality: Optional[str]
-    mode: str
-    protocol_version: str
-    is_synthetic: bool = False
-    left_median_latency_ms: Optional[float]
-    right_median_latency_ms: Optional[float]
-    left_correct: Optional[int]
-    left_valid: Optional[int]
-    right_correct: Optional[int]
-    right_valid: Optional[int]
-    both_correct: Optional[int]
-    both_valid: Optional[int]
-    enjoyment: Optional[int]
 
 
 class Review(BaseModel):
@@ -59,9 +39,6 @@ class ResidentRow(BaseModel):
     review: Review
     risk: str
     concerns: List[ConcernBrief]
-    # Oldest -> newest, completed sessions only, for a sparkline.
-    trend_left_ms: List[Optional[float]]
-    trend_right_ms: List[Optional[float]]
 
 
 class GameSession(BaseModel):
@@ -86,24 +63,7 @@ class ResidentDetail(BaseModel):
     dominant_hand: str
     review: Review
     insights: dict
-    sessions: List[SessionSummary]
     game_sessions: List[GameSession]
-
-
-def _fetch_sessions(conn, participant_id: UUID) -> List[dict]:
-    return conn.execute(
-        """SELECT s.session_id, s.started_at, s.completed_at, s.status, s.quality,
-                  s.mode, s.protocol_version, s.is_synthetic,
-                  ss.left_median_latency_ms, ss.right_median_latency_ms,
-                  ss.left_correct, ss.left_valid, ss.right_correct, ss.right_valid,
-                  ss.both_correct, ss.both_valid, ss.enjoyment
-           FROM sessions s
-           LEFT JOIN session_summaries ss ON ss.session_id = s.session_id
-           WHERE s.participant_id = %s AND s.protocol_version NOT LIKE 'garden-%%'
-             AND s.protocol_version NOT LIKE 'lobby-%%'
-           ORDER BY s.started_at DESC""",
-        (participant_id,),
-    ).fetchall()
 
 
 def _fetch_games(conn, participant_id: UUID) -> List[dict]:
@@ -139,14 +99,13 @@ def resident_profile(conn, participant_id: UUID) -> Optional[dict]:
     ).fetchone()
     if p is None:
         return None
-    sessions = _fetch_sessions(conn, participant_id)
     games = _fetch_games(conn, participant_id)
-    insights = add_model_concerns(resident_insights(sessions, games), games)
+    insights = add_model_concerns(analyze(games), games)
     insights["game_visits"] = len(games)
     return {
         "participant_id": p["participant_id"], "username": p["username"],
         "display_name": p["alias"], "dominant_hand": p["dominant_hand"],
-        "review": review_from(insights), "insights": insights, "sessions": sessions,
+        "review": review_from(insights), "insights": insights,
         "game_sessions": games,
     }
 
@@ -172,18 +131,14 @@ def residents(_: dict = Depends(current_caregiver)):
         profiles = all_profiles(conn)
     out = []
     for p in profiles:
-        sessions = p["sessions"]
-        done = [s for s in reversed(sessions) if s["status"] == "completed"][-12:]
-        played = [x["started_at"] for x in sessions[:1] + p["game_sessions"][:1]]
+        latest = p["game_sessions"][:1]
         out.append({
             "participant_id": p["participant_id"], "username": p["username"],
             "display_name": p["display_name"], "dominant_hand": p["dominant_hand"],
-            "session_count": len(sessions) + len(p["game_sessions"]),
-            "last_played_at": max(played) if played else None,
+            "session_count": len(p["game_sessions"]),
+            "last_played_at": latest[0]["started_at"] if latest else None,
             "review": p["review"], "risk": p["insights"]["risk"],
             "concerns": p["insights"]["concerns"],
-            "trend_left_ms": [s["left_median_latency_ms"] for s in done],
-            "trend_right_ms": [s["right_median_latency_ms"] for s in done],
         })
     out.sort(key=lambda r: (RISK_ORDER[r["risk"]], r["display_name"].lower()))
     return out

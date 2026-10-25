@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from . import gemini
 from .auth import current_caregiver
 from .db import pool
-from .insights import PATTERN_LABELS, fmt
+from .insights import PATTERN_LABELS
 from .residents import all_profiles, resident_profile
 
 log = logging.getLogger(__name__)
@@ -79,43 +79,18 @@ class Answer(BaseModel):
 
 # ---- facts ------------------------------------------------------------------
 
-def _session_line(s: dict) -> str:
-    def score(c, v):
-        return f"{c}/{v}" if c is not None and v else "-"
-
-    def sec(ms):
-        return fmt("latency", ms) if ms is not None else "-"
-
-    when = s["started_at"].strftime("%a %b %d %Y %H:%M") if hasattr(s["started_at"], "strftime") else s["started_at"]
-    return (f"{when} | {s['status']} | quality {s['quality'] or '-'} | left {sec(s['left_median_latency_ms'])}, "
-            f"{score(s['left_correct'], s['left_valid'])} | right {sec(s['right_median_latency_ms'])}, "
-            f"{score(s['right_correct'], s['right_valid'])} | both {score(s['both_correct'], s['both_valid'])} | "
-            f"enjoyment {str(s['enjoyment']) + '/5' if s['enjoyment'] else '-'}"
-            f"{' | simulated' if s.get('is_synthetic') else ''}")
-
-
-def baseline_unit(ins: dict) -> str:
-    """What the baseline is made of: game visits, or a demo resident's older reaction-test sessions."""
-    return "game visit" if ins.get("source") == "lobby" else "reaction-test session"
-
-
 def _resident_facts(p: dict, full: bool) -> str:
     ins = p["insights"]
     games = p.get("game_sessions", [])
-    unit = baseline_unit(ins)
-    activity = [f"{len(games)} game visits"]
-    if p["sessions"]:
-        activity.append(f"{len(p['sessions'])} earlier reaction-test sessions")
     lines = [f"RESIDENT: {p['display_name']} (dominant hand: {p['dominant_hand']}, recorded activity: "
-             f"{', '.join(activity)}; {ins['usable_sessions']} {unit}s usable for a baseline"
-             f"{', data is SIMULATED/synthetic' if ins['synthetic'] else ''})",
+             f"{len(games)} game visits; {ins['usable_visits']} with the controller usable for a baseline)",
              f"Overall: risk level '{ins['risk']}'. {ins['summary']}"]
     if ins["status"] == "ok":
-        lines.append(f"Baseline = median of {ins['baseline_sessions']} earlier {unit}s; latest = most recent {unit}.")
+        lines.append(f"Baseline = median of {ins['baseline_visits']} earlier game visits; latest = most recent visit.")
         lines.append("Measurements (latest vs usual, change):")
         for f in ins["findings"]:
             tag = "CHANGED" if f["flagged"] else f["direction"]
-            lines.append(f"  - {f['text']} [{tag}{f', persisted across recent {unit}s' if f['persistent'] else ''}]")
+            lines.append(f"  - {f['text']} [{tag}{', persisted across recent visits' if f['persistent'] else ''}]")
     for c in ins["concerns"]:
         lines.append(f"POTENTIAL CONCERN ({c['level']}): {c['title']} - {c['summary']}")
         lines.append("  Evidence: " + " ".join(c["evidence"]))
@@ -130,9 +105,6 @@ def _resident_facts(p: dict, full: bool) -> str:
         if len(pad) < len(games):
             lines.append(f"  {len(games) - len(pad)} other game visits used keyboard input instead of the controller. "
                          "They do not reflect thumb movement, so their measurements are left out.")
-    if full and p["sessions"]:
-        lines.append("Reaction-test session history (newest first):")
-        lines += [f"  {_session_line(s)}" for s in p["sessions"][:30]]
     return "\n".join(lines)
 
 
@@ -246,7 +218,6 @@ def _rules_answer(q: str, profiles: List[dict], focus: Optional[dict]) -> str:
         return "\n".join(out)
 
     ins, name = focus["insights"], focus["display_name"]
-    unit = baseline_unit(ins)
     findings = ins["findings"]
 
     def pick(*words):
@@ -254,7 +225,7 @@ def _rules_answer(q: str, profiles: List[dict], focus: Optional[dict]) -> str:
 
     if pick("recommend", "should", "check", "next", "do ", "action"):
         if not ins["concerns"]:
-            return f"No checks are recommended for {name} right now; recent {unit}s match their usual pattern."
+            return f"No checks are recommended for {name} right now; recent game visits match their usual pattern."
         out = []
         for c in ins["concerns"]:
             out.append(f"{c['title']}:")
@@ -274,19 +245,13 @@ def _rules_answer(q: str, profiles: List[dict], focus: Optional[dict]) -> str:
     kinds = None
     if hand is None:
         if pick("accura", "correct", "miss", "lane", "track", "distance"):
-            kinds = {"accuracy", "distance", "share"}
+            kinds = {"distance", "share"}
         elif pick("slow", "fast", "speed", "response", "reaction", "time", "reach"):
-            kinds = {"latency", "gap", "seconds"}
-        elif pick("enjoy", "mood", "engag", "like"):
-            kinds = {"enjoyment"}
-        elif pick("both", "coordinat", "two"):
-            hand = "both"
+            kinds = {"seconds"}
 
     if hand or kinds:
-        rows = [f"- {f['text']}" for f in findings
-                if (hand and f["hand"] == hand) or (hand in ("left", "right") and f["key"] == "lr_gap")
-                or (kinds and f["kind"] in kinds)]
-        return f"{name}, latest {unit} compared with their usual:\n" + "\n".join(rows or ["- No data for that yet."])
+        rows = [f"- {f['text']}" for f in findings if f["hand"] == hand or (kinds and f["kind"] in kinds)]
+        return f"{name}, latest game visit compared with their usual:\n" + "\n".join(rows or ["- No data for that yet."])
 
     out = [f"{name}: {ins['summary']}"]
     changed = [f for f in findings if f["flagged"]]

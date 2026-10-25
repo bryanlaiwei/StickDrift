@@ -13,46 +13,19 @@ export interface Me {
   dominant_hand: Hand | null
 }
 
-export interface SessionSummary {
-  session_id: string
-  started_at: string
-  completed_at: string | null
-  status: 'completed' | 'abandoned' | 'in_progress'
-  quality: 'good' | 'flagged' | 'invalid' | null
-  mode: string
-  protocol_version: string
-  is_synthetic: boolean
-  left_median_latency_ms: number | null
-  right_median_latency_ms: number | null
-  left_correct: number | null
-  left_valid: number | null
-  right_correct: number | null
-  right_valid: number | null
-  both_correct: number | null
-  both_valid: number | null
-  enjoyment: number | null
-}
-
 export interface Review {
   flagged: boolean
   reasons: string[]
 }
 
 export type Risk = 'none' | 'watch' | 'check'
-export type MeasureKey =
-  | 'left_latency'
-  | 'right_latency'
-  | 'left_accuracy'
-  | 'right_accuracy'
-  | 'both_accuracy'
-  | 'lr_gap'
-  | 'enjoyment'
-
+/** One measurement of one game and hand compared with the resident's usual, e.g. apple_reach_s_left. */
 export interface Finding {
-  key: MeasureKey
+  key: string
   label: string
-  hand: 'left' | 'right' | 'both' | null
-  kind: 'latency' | 'accuracy' | 'gap' | 'enjoyment'
+  hand: 'left' | 'right'
+  /** seconds and distance: higher is worse; share (time on the lane): lower is worse */
+  kind: 'seconds' | 'distance' | 'share'
   baseline: number
   latest: number
   change: number
@@ -62,7 +35,7 @@ export interface Finding {
   direction: 'worse' | 'better' | 'steady'
   flagged: boolean
   persistent: boolean
-  flagged_session_ids: string[]
+  flagged_visit_ids: string[]
   text: string
 }
 
@@ -75,7 +48,7 @@ export interface Concern {
   possible_contributors: string[]
   recommended_checks: string[]
   references: string[]
-  measurements: MeasureKey[]
+  measurements: string[]
 }
 
 export interface Insights {
@@ -83,11 +56,10 @@ export interface Insights {
   risk: Risk
   summary: string
   disclaimer: string
-  synthetic: boolean
-  usable_sessions: number
+  usable_visits: number
   game_visits?: number
-  baseline_sessions: number
-  recent_session_ids: string[]
+  baseline_visits: number
+  recent_visit_ids: string[]
   findings: Finding[]
   concerns: Concern[]
 }
@@ -102,8 +74,6 @@ export interface ResidentRow {
   review: Review
   risk: Risk
   concerns: Pick<Concern, 'id' | 'title' | 'level'>[]
-  trend_left_ms: (number | null)[]
-  trend_right_ms: (number | null)[]
 }
 
 export type PatternKey = 'parkinson' | 'stroke' | 'essential_tremor'
@@ -162,7 +132,6 @@ export interface ResidentDetail {
   dominant_hand: Hand
   review: Review
   insights: Insights
-  sessions: SessionSummary[]
   game_sessions: GameSession[]
 }
 
@@ -350,13 +319,7 @@ export const api = {
 
 
   caregiverResidents: () => request<ResidentRow[]>('/caregiver/residents'),
-  // an API older than the page leaves out lists added since (game_sessions), so default them
-  caregiverResident: (id: string) =>
-    request<ResidentDetail>(`/caregiver/residents/${id}`).then((d) => ({
-      ...d,
-      sessions: d.sessions ?? [],
-      game_sessions: d.game_sessions ?? [],
-    })),
+  caregiverResident: (id: string) => request<ResidentDetail>(`/caregiver/residents/${id}`),
   // the PDF prints times in the reader's zone so they match the site
   residentReport: (id: string) =>
     download(
