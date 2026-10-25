@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
-import type { Visit, HandLive } from '../api'
-import { visitLabels } from '../format'
-import { Tabs } from './Tabs'
+import type { Visit, HandLive } from '../../api'
+import { visitLabels } from '../../format'
+import { Tabs } from '../ui/Tabs'
 
 interface Series {
   label: string

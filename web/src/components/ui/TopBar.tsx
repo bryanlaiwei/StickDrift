@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { useAuth } from '../auth'
+import { useAuth } from '../../auth'
 import { StampMark } from './StampMark'
 
 function ProfileMenu() {

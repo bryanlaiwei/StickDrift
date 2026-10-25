@@ -196,9 +196,12 @@ backend/                     FastAPI API (its own venv, backend/requirements.txt
   app/gemini.py              The Gemini client shared by the assistant and the report
   app/hand_replays.py        Stores and serves each visit's reconstructed-hands GIF
   sql/schema.sql             The Tiger Data schema (the only definition of it)
-  scripts/                   Demo data and demo logins
+  scripts/create_caregiver.py  A first caregiver login
 web/                         Website (React + Vite) and the browser lobby games
-  src/                       Login, resident home, caregiver dashboard, live view, resident pages
+  src/pages/                 Welcome, login, resident home, caregiver dashboard, live session, resident page
+  src/components/            live/ (live view), resident/ (resident page), charts/ (visit results), ui/ (shared)
+  src/styles/                Site-wide, live-view and caregiver styles, plus the evening-room theme
+  src/api.ts                 Every API call and type the site uses
   lobby.html, lobby/         3D lobby and games (three.js); live.js streams, measure.js measures
 ml/                          Everything in the root uv environment (Python 3.14, torch)
   pattern_model/             Movement pattern model: recordings, network, training, scoring
@@ -207,7 +210,7 @@ ml/                          Everything in the root uv environment (Python 3.14,
   runs/pattern_model/        Trained checkpoint (model.pt)
 tests/
   backend/  ml/  web/        Python (unittest) and Node tests for each part
-docs/                        Project context and decision log (context.md), product brief, UX notes
+docs/                        What the app is and why (context.md, with the decision log), product brief
 deploy/worker.js             Cloudflare Worker that proxies /api (config: wrangler.jsonc at the root)
 data/                        Local recordings (gitignored)
 ```
@@ -216,8 +219,8 @@ data/                        Local recordings (gitignored)
 
 ```bash
 backend/.venv/bin/python -m unittest discover -s tests/backend -t .
-.venv/bin/python -m unittest discover -s tests/ml -t .
-node tests/web/lobby_measure.mjs && node tests/web/rat_timing.mjs
+MPLBACKEND=Agg .venv/bin/python -m unittest discover -s tests/ml -t .
+cd web && npm test && npm run lint && npm run build
 ```
 
 ### 🔌 API

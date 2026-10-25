@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type LiveSample, type LiveSnapshot, type LiveStatus } from '../api'
+import { api, type LiveSample, type LiveSnapshot, type LiveStatus } from '../../api'
 
 const KEEP = 100 * 40 // samples kept for the charts (~40 s)
 const DELAY_MS = 150 // jitter buffer: samples play back this far behind their arrival, evenly spaced

@@ -5,7 +5,7 @@ export type LanternShape = 'column' | 'moon'
 
 /**
  * An akari: dyed washi stretched over bamboo ribs, lit from inside. Drawn as SVG so the ribs bow like paper under
- * light. The colours come from the dye class on a parent (.dye-resident / .dye-care, see room.css). The light
+ * light. The colours come from the dye class on a parent (.dye-resident / .dye-care, see styles/room.css). The light
  * is the state: dim until the page "switches it on", brighter when its door is hovered or focused.
  */
 export function Lantern({

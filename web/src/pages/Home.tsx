@@ -1,7 +1,7 @@
 import { useAuth } from '../auth'
-import { GameArt, type ArtKind } from '../components/GameArt'
-import { Lantern } from '../components/Lantern'
-import { LobbyPreview } from '../components/LobbyPreview'
+import { GameArt, type ArtKind } from '../components/ui/GameArt'
+import { Lantern } from '../components/ui/Lantern'
+import { LobbyPreview } from '../components/ui/LobbyPreview'
 import './Home.css'
 
 interface Best {

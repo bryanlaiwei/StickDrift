@@ -1,11 +1,18 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { type HandLive, type LiveStatus } from '../api'
-import { HandReplay } from '../components/HandReplay'
-import { DiffBars, PatternBars, RatPoints, ReachTrialsChart, RollingChart, StickFields, hasPatternScores } from '../components/LiveCharts'
-import { handPoint, handPos, handTarget, levelName, pct, secs } from '../components/liveData'
-import { TabPanel, Tabs } from '../components/Tabs'
-import { useLiveFeed } from '../components/useLiveFeed'
+import { HandReplay } from '../components/charts/HandReplay'
+import { PatternBars } from '../components/charts/PatternBars'
+import { RatPoints } from '../components/charts/RatPoints'
+import { DiffBars } from '../components/live/DiffBars'
+import { ReachTrialsChart } from '../components/live/ReachTrialsChart'
+import { RollingChart } from '../components/live/RollingChart'
+import { StickFields } from '../components/live/StickFields'
+import { hasPatternScores, levelName } from '../labels'
+import { handPoint, handPos, handTarget } from '../components/live/samples'
+import { pct, secs } from '../format'
+import { TabPanel, Tabs } from '../components/ui/Tabs'
+import { useLiveFeed } from '../components/live/useLiveFeed'
 
 const DONE: LiveStatus[] = ['finished', 'failed', 'lost', 'ended']
 

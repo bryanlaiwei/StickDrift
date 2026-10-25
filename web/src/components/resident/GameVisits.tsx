@@ -1,9 +1,8 @@
 import { Fragment, useState } from 'react'
-import type { GameResult, Visit, HandLive, LobbyGame, RatReport } from '../api'
-import { formatDateTime } from '../format'
-import { HandReplay } from './HandReplay'
-import { RatPoints } from './LiveCharts'
-import { pct, secs } from './liveData'
+import type { GameResult, Visit, HandLive, LobbyGame, RatReport } from '../../api'
+import { formatDateTime, pct, secs } from '../../format'
+import { HandReplay } from '../charts/HandReplay'
+import { RatPoints } from '../charts/RatPoints'
 import { VisitPatterns } from './VisitPatterns'
 
 const GAME_NAMES: Record<LobbyGame, string> = {

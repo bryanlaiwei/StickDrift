@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { api, type AssistantAnswer, type ChatTurn } from '../api'
+import { api, type AssistantAnswer, type ChatTurn } from '../../api'
 
 type Message = ChatTurn & { meta?: AssistantAnswer }
 

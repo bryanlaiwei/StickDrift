@@ -12,7 +12,7 @@ export function LobbyPreview() {
   useEffect(() => {
     let cancelled = false
     let dispose: (() => void) | undefined
-    import('../../lobby/preview.js')
+    import('../../../lobby/preview.js')
       .then(({ mountPreview }) => {
         if (cancelled || !canvas.current) return
         try {

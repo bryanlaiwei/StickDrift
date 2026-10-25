@@ -326,7 +326,7 @@ a.hm-card:hover {
 .hm-btn { text-decoration: none; }
 .hm-btn:hover { transform: none; }
 .hm-chip { background: var(--accent-soft); color: var(--ink); }
-.hm-gold, .hm-stars .on { color: #ffcf4a; }
+.hm-stars .on { color: #ffcf4a; }
 .hm-soon { background: transparent; }
 @media (max-width: 600px) { .hm-lamps { display: none; } }
 

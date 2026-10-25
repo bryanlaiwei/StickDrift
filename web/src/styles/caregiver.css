@@ -1,0 +1,244 @@
+/* Caregiver pages: the residents dashboard, the resident page (concerns, trends, game visits), the assistant. */
+
+/* Caregiver dashboard */
+.menu-role { color: var(--muted); font-weight: 400; }
+.crumb { margin-bottom: 16px; }
+
+.resident-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 16px;
+}
+.resident-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+.resident-card:hover { border-color: var(--accent); }
+.resident-card-flag { border-left: 5px solid var(--bad); }
+.resident-card-head { display: flex; gap: 12px; align-items: center; }
+.resident-name { display: block; font-weight: 700; font-size: 1.1rem; }
+.resident-meta { display: block; color: var(--muted); font-size: 0.85rem; }
+.resident-flag { color: var(--bad); font-weight: 700; font-size: 0.9rem; }
+.resident-flag ul { margin: 8px 0 0; padding-left: 1.2em; font-weight: 400; color: var(--ink); }
+.resident-flag li { margin-bottom: 4px; }
+
+.resident-ok { color: var(--ok); font-weight: 700; font-size: 0.9rem; }
+.resident-foot { font-size: 0.8rem; margin-top: auto; }
+
+.review { padding: 16px; border-radius: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+.review ul { margin: 4px 0 0; padding-left: 1.2em; }
+.review li { margin-bottom: 4px; }
+
+/* Caregiver trend charts */
+
+.chart { margin: 0; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+
+.chart figcaption { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.chart figcaption strong { font-size: 1.05rem; }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; }
+.chart-key { display: inline-flex; align-items: center; gap: 7px; font-size: 0.9rem; color: var(--muted); }
+.chart-swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+.chart-dash { width: 20px; border-top: 2px dashed var(--muted); display: inline-block; }
+.chart-ring { width: 13px; height: 13px; border-radius: 50%; border: 2.5px solid var(--bad); display: inline-block; }
+.chart-svg { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: var(--line); stroke-width: 1; }
+.chart-axis { fill: var(--muted); font-size: 13px; }
+.chart-line { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.chart-dot { stroke: var(--surface); stroke-width: 1.5; }
+
+/* Risk alert + concerns */
+.risk-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
+  vertical-align: middle; white-space: nowrap; border: 1px solid currentColor; }
+.risk-check { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); }
+.risk-watch { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+.risk-none { color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
+.page-head h1 .risk-badge { font-size: 0.85rem; margin-left: 8px; }
+.badge-synthetic { color: var(--synthetic); border-color: currentColor; margin-left: 8px; }
+.risk-alert { border-radius: var(--radius); padding: 16px 18px; margin-bottom: 20px; border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.risk-alert p { margin: 4px 0 0; }
+.risk-alert-check { border: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 9%, var(--surface)); }
+.risk-alert-watch { border: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); }
+.risk-alert-none { background: var(--accent-soft); border-color: transparent; }
+
+.risk-alert-check strong { color: var(--bad); }
+.risk-alert-watch strong { color: var(--warn); }
+.risk-icon { width: 26px; height: 26px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round;
+  stroke-linecap: round; color: var(--bad); margin-top: 1px; }
+.risk-alert-watch .risk-icon { color: var(--warn); }
+
+.concern-list { display: flex; flex-direction: column; gap: 16px; margin-top: 12px; }
+.concern { border: 1px solid var(--line); border-left: 5px solid var(--warn); border-radius: 12px; padding: 16px 18px; }
+.concern-check { border-left-color: var(--bad); }
+.concern header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.concern h3 { margin: 0; font-size: 1.1rem; }
+.concern h4 { margin: 0 0 6px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.concern ul, .concern ol { margin: 0; padding-left: 1.2em; }
+.concern li { margin-bottom: 5px; }
+.concern-cols { display: grid; grid-template-columns: 1fr; gap: 16px; margin: 12px 0; }
+@media (min-width: 760px) { .concern-cols { grid-template-columns: 1fr 1fr; } }
+.concern-checks { background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; }
+
+/* Dashboard additions */
+.resident-grid + .assistant { margin-top: 24px; }
+.resident-card-head .risk-badge { margin-left: auto; }
+.resident-card-watch { border-left-color: var(--warn); }
+
+/* Care assistant */
+.assistant { display: flex; flex-direction: column; gap: 12px; }
+.assistant-head p { margin: 4px 0 0; }
+.assistant-log { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  padding: 4px 2px; }
+.assistant-suggest { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: inherit; font-size: 0.92rem; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); cursor: pointer; }
+.chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.msg { max-width: min(680px, 92%); padding: 10px 14px; border-radius: 14px; line-height: 1.5; }
+.msg-text { white-space: pre-wrap; }
+.msg-user { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
+.msg-assistant { align-self: flex-start; background: var(--accent-soft); border-bottom-left-radius: 4px; }
+.msg-busy { color: var(--muted); font-style: italic; }
+.msg-meta { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 8px; font-size: 0.8rem; }
+.source { font-weight: 700; color: var(--accent); }
+.source-gemini { color: var(--synthetic); }
+.msg-warn { color: var(--warn); font-weight: 700; }
+.assistant-form { display: flex; gap: 8px; }
+.assistant-form input { flex: 1; min-width: 0; min-height: 52px; padding: 0 14px; border-radius: 10px;
+  border: 2px solid var(--line); background: var(--surface); }
+.assistant-form input:focus { border-color: var(--accent); }
+.calm { text-align: left; }
+.calm p { margin: 0; }
+
+/* Resident header */
+.resident-head { display: flex; gap: 16px; align-items: center; margin: 6px 0 18px; }
+.resident-head h1 { margin: 0 0 2px; font-size: 1.9rem; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.resident-head p { margin: 0; }
+.avatar-lg { width: 56px; height: 56px; font-size: 1.4rem; flex: none; }
+
+/* Alert strip */
+.risk-alert { flex-direction: row; align-items: center; gap: 14px; padding: 14px 18px; margin: 0 0 4px; border-width: 1px; }
+.risk-alert-check { border-width: 1px; }
+.risk-alert-watch { border-width: 1px; }
+.risk-alert-body { flex: 1; min-width: 0; }
+.risk-alert-body strong { display: block; }
+.risk-alert-body p { margin: 2px 0 0; color: var(--ink); }
+.risk-alert .btn { flex: none; }
+.risk-icon { margin-top: 0; }
+@media (max-width: 640px) { .risk-alert { flex-wrap: wrap; } }
+
+/* Concerns: two columns, details tucked away */
+.concern { padding: 20px 22px; }
+.concern header { margin-bottom: 4px; }
+.concern-summary { margin: 0 0 14px; color: var(--muted); }
+.concern-cols { grid-template-columns: 1fr; gap: 18px; margin: 0; }
+@media (min-width: 820px) { .concern-cols { grid-template-columns: 1fr 1.25fr; } }
+.concern-cols > section { padding: 14px 16px; border-radius: 12px; background: color-mix(in srgb, var(--line) 28%, transparent); }
+.concern-cols > .concern-checks { background: var(--accent-soft); }
+.concern-steady { font-size: 0.88rem; margin: 10px 0 0; }
+.concern details { margin-top: 8px; }
+.concern summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+.concern-more { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.concern-more details { margin: 0; flex: 1 1 260px; }
+.concern-more ul { margin: 8px 0 0; padding-left: 1.2em; font-size: 0.92rem; color: var(--muted); }
+
+/* One chart at a time */
+.chart-single { display: flex; flex-direction: column; gap: 16px; }
+.chart-single .chart { border: 0; padding: 0; }
+
+.chart-single .chart figcaption { margin-bottom: 4px; }
+.resident-grid { gap: 16px; margin-bottom: 24px; }
+.resident-card { padding: 18px 20px; gap: 10px; }
+.resident-flag { margin: 0; display: flex; flex-direction: column; gap: 2px; color: var(--ink); font-weight: 400; }
+.resident-flag strong { color: var(--bad); }
+.resident-reason { font-size: 0.9rem; color: var(--muted); }
+.resident-ok { margin: 0; color: var(--ok); font-weight: 700; font-size: 0.95rem; }
+.resident-foot { margin: 0; font-size: 0.85rem; }
+.tool { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); margin-bottom: 12px; }
+.tool > summary { cursor: pointer; font-weight: 700; padding: 16px 20px; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.tool > summary::-webkit-details-marker { display: none; }
+.tool > summary::after { content: "+"; font-size: 1.4rem; color: var(--muted); line-height: 1; }
+.tool[open] > summary::after { content: "–"; }
+.tool > .panel { border: 0; box-shadow: none; background: transparent; padding: 0 20px 20px; margin: 0; }
+.tool .assistant-head h2 { display: none; }
+main.page-pad > .live-now + .panel, main.page-pad > .risk-alert + .tabs { margin-top: 20px; }
+@media (max-width: 640px) {
+  .risk-alert-body { flex-basis: calc(100% - 50px); }
+  .risk-alert .btn { width: 100%; }
+}
+
+/* resident page: web lobby game visits */
+.game-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 12px; }
+.game-card { border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; background: var(--surface); }
+.game-card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.game-card h3 { margin: 0; font-size: 1.05rem; }
+.game-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.game-table th, .game-table td { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+.game-table tbody tr:last-child th, .game-table tbody tr:last-child td { border-bottom: 0; }
+.game-table th { text-transform: none; letter-spacing: normal; }
+.game-table thead th { font-size: 0.8rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.game-table thead i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+.game-table tbody th { font-size: 0.95rem; font-weight: 500; color: var(--ink); cursor: help; }
+.game-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.game-table thead th:not(:first-child) { text-align: right; }
+
+.report-btn { margin-left: auto; align-self: center; }
+.report-btn .error { margin: 6px 0 0; font-size: 0.85rem; }
+
+.visit-score { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 12px; }
+.visit-score-kicker { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.visit-score strong { font-size: 1.8rem; font-variant-numeric: tabular-nums; line-height: 1; }
+.visit-score span:last-child { color: var(--muted); }
+.game-note { margin: 8px 0 0; font-size: 0.92rem; }
+.game-patterns { margin-top: 18px; }
+.game-patterns h3 { margin: 0 0 2px; font-size: 1.05rem; }
+
+/* game visits: what was played, in plain words */
+.visit-status { border-radius: 14px; padding: 14px 16px; margin: 12px 0 16px; border: 1px solid var(--line); background: var(--surface); }
+.visit-status-ok { border-color: var(--ok); }
+.visit-status-part { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.visit-status p { margin: 10px 0 0; font-size: 1rem; line-height: 1.5; }
+.visit-chips { display: flex; flex-wrap: wrap; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.visit-chip { display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.visit-chip small { display: block; font-size: 0.8rem; color: var(--muted); }
+.visit-chip-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-weight: 700; background: var(--line); color: var(--ink); }
+.visit-chip-done .visit-chip-mark { background: var(--ok); color: #fff; }
+.visit-chip-early .visit-chip-mark { background: var(--accent); color: var(--accent-ink); }
+.visit-chip-none { border-style: dashed; color: var(--muted); }
+.game-card-none { border-style: dashed; background: transparent; }
+.game-card-none h3 { color: var(--muted); }
+.game-headline { margin: 4px 0 2px; font-size: 1.25rem; font-weight: 700; line-height: 1.3; }
+.game-blurb { margin: 0 0 10px; font-size: 0.9rem; }
+
+.delta-note { display: block; font-weight: 400; font-size: 0.78rem; color: var(--muted); margin-top: 2px; white-space: normal; }
+.game-more { margin-top: 10px; }
+.game-more summary { cursor: pointer; font-size: 0.92rem; color: var(--accent); font-weight: 600; }
+.game-more .game-table { margin-top: 8px; }
+td.partial { color: var(--accent); font-weight: 600; }
+.badge-live { color: var(--ok); border-color: currentColor; margin-left: 8px; }
+
+.game-glossary { margin: 14px 0 6px; }
+.game-glossary dl { margin: 8px 0 0; display: grid; gap: 8px; }
+.game-glossary dt { font-weight: 600; font-size: 0.92rem; }
+.game-glossary dd { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.game-table tbody th { width: 46%; }
+
+/* reconstructed hands (ml/hand_replay/): the GIF is drawn on a white surface, so its frame stays white in dark mode */
+.hand-replay { margin: 14px 0 0; max-width: 400px; display: flex; flex-direction: column; gap: 8px; }
+.hand-replay-frame { aspect-ratio: 4 / 3; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #ffffff; }
+.hand-replay-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.hand-replay-wait { background: color-mix(in srgb, var(--line) 35%, var(--surface)); }
+.hand-replay figcaption { display: flex; flex-direction: column; gap: 2px; font-size: 0.95rem; }
+.hand-toggle { font: inherit; font-size: 0.85rem; font-weight: 600; color: var(--accent); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.hand-toggle:hover, .hand-toggle[aria-expanded="true"] { border-color: var(--accent); }
+.hand-row td { border-top: 0; padding-top: 0; white-space: normal; }
+.hand-row .hand-replay { margin-top: 0; }

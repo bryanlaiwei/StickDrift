@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { handReplayUrl, type HandReplayInfo } from '../api'
-import { levelName } from './liveData'
+import { handReplayUrl, type HandReplayInfo } from '../../api'
+import { levelName } from '../../labels'
 
 function windowText(info: HandReplayInfo | null | undefined) {
   if (!info) return null

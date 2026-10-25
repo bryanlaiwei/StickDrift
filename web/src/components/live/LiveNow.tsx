@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
-import { api, type LiveBrief, type LiveStatus } from '../api'
-import { levelName, PATTERN_LABELS, PATTERN_ORDER } from './liveData'
+import { api, type LiveBrief, type LiveStatus } from '../../api'
+import { levelName, PATTERN_LABELS, PATTERN_ORDER } from '../../labels'
 
 const ACTIVE: LiveStatus[] = ['ready', 'playing', 'scoring']
 

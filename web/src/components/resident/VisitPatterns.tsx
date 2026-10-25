@@ -1,6 +1,7 @@
-import type { Visit } from '../api'
-import { formatDateTime } from '../format'
-import { PatternBars, hasPatternScores } from './LiveCharts'
+import type { Visit } from '../../api'
+import { formatDateTime } from '../../format'
+import { PatternBars } from '../charts/PatternBars'
+import { hasPatternScores } from '../../labels'
 
 /** Why a lobby visit has no pattern scores, in words a caregiver can act on. */
 function unscoredReason(v: Visit): string {

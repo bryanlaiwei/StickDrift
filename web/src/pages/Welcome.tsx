@@ -1,9 +1,9 @@
 import { Link } from 'react-router'
-import { GameStrip } from '../components/GameStrip'
-import { Lantern } from '../components/Lantern'
-import { StampMark } from '../components/StampMark'
-import { useNightRoom } from '../components/useNightRoom'
-import '../components/room.css'
+import { GameStrip } from '../components/ui/GameStrip'
+import { Lantern } from '../components/ui/Lantern'
+import { StampMark } from '../components/ui/StampMark'
+import { useNightRoom } from '../components/ui/useNightRoom'
+import '../styles/room.css'
 import './Welcome.css'
 
 /** One door: a lantern you walk up to. The stamp is the link; its hit area stretches over the whole door. */

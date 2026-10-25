@@ -1,0 +1,122 @@
+/*
+ * The evening room for the whole app. room.css swaps the colour tokens to the dim aubergine room; this file gives the
+ * shared pieces (top bar, cards, buttons, tabs, headings) the same paper-and-stamp feel. The resident home and the
+ * welcome / sign-in pages add lanterns on top. The care-team pages use only this file, so they stay quiet and plain.
+ */
+:root[data-room="night"] {
+  --display: "Zen Maru Gothic", "Atkinson Hyperlegible", system-ui, sans-serif;
+  --stamp: #d93a2b;
+  --stamp-ink: #fff3ea;
+  --paper: #f5eee4;
+  --paper-ink: #261a2e;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --radius: 10px;
+  --card-shadow: 0 14px 28px -14px rgba(5, 2, 10, 0.75);
+  --good: #8fe0a6;
+}
+:root[data-room="night"] {
+  --ok: #8fe0a6;
+  --warn: #f2b45e;
+  --bad: #ff8d80;
+  --synthetic: #c9b8f2;
+  --accent-soft: #3a2850;
+  --wait: #b3a8bf;
+}
+
+[data-room="night"] h1,
+[data-room="night"] h2 {
+  font-family: var(--display);
+  font-weight: 900;
+  letter-spacing: -0.015em;
+}
+[data-room="night"] h3 {
+  font-family: var(--display);
+  font-weight: 700;
+}
+
+/* ---- top bar: one space with the room ---- */
+[data-room="night"] .topbar {
+  background: color-mix(in srgb, var(--bg) 88%, #000);
+  border-bottom: 1px solid var(--line);
+}
+[data-room="night"] .menu-button { background: var(--surface); }
+[data-room="night"] .avatar { background: var(--accent); color: var(--accent-ink); }
+[data-room="night"] .menu-list { background: var(--surface); border-radius: 8px; }
+[data-room="night"] .menu-item:hover,
+[data-room="night"] .menu-item:focus-visible { background: var(--accent-soft); }
+
+/* ---- buttons: the primary one is a vermilion stamp ---- */
+[data-room="night"] .btn {
+  border-radius: 6px;
+  border-color: var(--stamp);
+  background: var(--stamp);
+  color: var(--stamp-ink);
+  font-family: var(--display);
+  font-weight: 700;
+  box-shadow: 0 3px 0 #8f1f16;
+  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease), filter 0.18s var(--ease);
+}
+[data-room="night"] .btn:hover:not(:disabled) { filter: brightness(1.07); }
+[data-room="night"] .btn:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 #8f1f16; }
+[data-room="night"] .btn-quiet,
+[data-room="night"] .btn-secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line);
+  box-shadow: none;
+}
+[data-room="night"] .btn-quiet:hover:not(:disabled),
+[data-room="night"] .btn-secondary:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); filter: none; }
+[data-room="night"] .btn-quiet:active,
+[data-room="night"] .btn-secondary:active { transform: none; }
+[data-room="night"] a:not(.btn):not(.stamp):not(.hm-btn) { color: var(--accent); }
+[data-room="night"] .btn { color: var(--stamp-ink); }
+[data-room="night"] .btn-quiet,
+[data-room="night"] .btn-secondary { color: var(--ink); }
+
+/* ---- cards: dyed surface, small radius, soft drop shadow ---- */
+[data-room="night"] .panel, [data-room="night"] .resident-card, [data-room="night"] .tool, [data-room="night"] .tile, [data-room="night"] .game-card, [data-room="night"] .concern, [data-room="night"] .visit-status, [data-room="night"] .live-card, [data-room="night"] .chart {
+  border-radius: 8px;
+}
+[data-room="night"] .panel, [data-room="night"] .resident-card, [data-room="night"] .tool {
+  box-shadow: var(--card-shadow);
+}
+[data-room="night"] .resident-card { transition: transform 0.4s var(--ease), border-color 0.2s; }
+[data-room="night"] .resident-card:hover { transform: translateY(-4px); }
+[data-room="night"] .resident-card-flag { border-left-color: var(--bad); }
+[data-room="night"] .resident-card-watch { border-left-color: var(--warn); }
+[data-room="night"] .concern-checks { background: var(--accent-soft); }
+[data-room="night"] .risk-alert-none { background: var(--accent-soft); }
+[data-room="night"] .chart-svg .chart-dot { stroke: var(--surface); }
+
+/* ---- page headings: an eyebrow tag and a big rounded title ---- */
+[data-room="night"] .page-title h1,
+[data-room="night"] .resident-head h1,
+[data-room="night"] .page-head h1 {
+  font-size: clamp(2rem, 4.6vw, 2.9rem);
+  line-height: 1.05;
+}
+.eyebrow {
+  margin: 0 0 6px;
+  font: 700 0.8rem / 1 var(--display, inherit);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--stamp);
+}
+[data-room="night"] .eyebrow { color: #ff8d80; }
+[data-room="night"] .step { color: #ff8d80; font-family: var(--display); letter-spacing: 0.16em; }
+[data-room="night"] .crumb a { text-decoration: none; font-weight: 700; }
+[data-room="night"] .crumb a:hover { text-decoration: underline; }
+[data-room="night"] .avatar-lg { border-radius: 8px; }
+
+/* ---- tabs: paper tags ---- */
+[data-room="night"] .tabs-tabs { border-bottom-color: var(--line); }
+[data-room="night"] .tabs-tabs .tab { font-family: var(--display); }
+[data-room="night"] .tabs-tabs .tab.on { border-bottom-color: var(--stamp); }
+[data-room="night"] .tabs-pills .tab.on { background: var(--paper); border-color: var(--paper); color: var(--paper-ink); }
+
+/* ---- bits ---- */
+[data-room="night"] .badge-good { color: var(--ok); }
+[data-room="night"] .pattern-fill { background: var(--accent); }
+[data-room="night"] :focus-visible { outline-color: var(--ink); }
+

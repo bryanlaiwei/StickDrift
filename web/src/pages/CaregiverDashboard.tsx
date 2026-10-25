@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { api, type ResidentRow } from '../api'
-import { Assistant } from '../components/Assistant'
-import { RiskBadge } from '../components/Insights'
-import { LiveNow } from '../components/LiveNow'
+import { Assistant } from '../components/resident/Assistant'
+import { RiskBadge } from '../components/resident/Insights'
+import { LiveNow } from '../components/live/LiveNow'
 import { formatDateTime } from '../format'
 
 export default function CaregiverDashboard() {

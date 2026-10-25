@@ -1,4 +1,4 @@
-import type { Concern, Insights, Risk } from '../api'
+import type { Concern, Insights, Risk } from '../../api'
 
 const RISK_LABEL: Record<Risk, string> = {
   check: 'Check soon',
