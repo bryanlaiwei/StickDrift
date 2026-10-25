@@ -204,7 +204,7 @@ def run(root, timezone, dry_run=False):
             "to_regclass('garden_sample_seconds') AS timeline"
         ).fetchone()
         if not all(schema_ready.values()):
-            raise RuntimeError("Apply backend/schema.sql to TigerData before importing recordings")
+            raise RuntimeError("Apply backend/sql/schema.sql to TigerData before importing recordings")
         for folder in folders:
             try:
                 group = str(folder.parent.relative_to(root)) if folder != root else None

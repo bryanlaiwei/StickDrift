@@ -18,7 +18,7 @@ from . import gemini
 from .auth import current_caregiver
 from .db import pool
 from .insights import PATTERN_LABELS, fmt
-from .views import all_profiles, resident_profile
+from .residents import all_profiles, resident_profile
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["assistant"])

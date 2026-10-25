@@ -1,4 +1,4 @@
-"""Reconstructed-hands GIFs for lobby visits: one per visit, drawn by hand_replay/ when the visit ends.
+"""Reconstructed-hands GIFs for lobby visits: one per visit, drawn by ml/hand_replay/ when the visit ends.
 
 The table is created on first insert, so a database set up before it existed needs no manual step.
 Reads treat a missing table as "no replay"; nothing here may stop a visit from being saved or shown.

@@ -260,7 +260,7 @@ def _concerns(f: Dict[str, dict], recent_abandoned: int) -> List[dict]:
 
 
 def analyze(sessions: List[dict]) -> dict:
-    """Sessions come newest-first, as returned by views._fetch_sessions."""
+    """Sessions come newest-first, as returned by residents._fetch_sessions."""
     usable = [s for s in sessions if s["status"] == "completed" and s["quality"] in ("good", "flagged")]
     synthetic = any(s.get("is_synthetic") for s in sessions)
     recent_abandoned = sum(1 for s in sessions[:3] if s["status"] == "abandoned")
@@ -334,7 +334,7 @@ def _lobby_measure(key: str) -> tuple:
 
 
 def analyze_lobby(visits: List[dict]) -> dict:
-    """Lobby visits come newest-first, as returned by views._fetch_games. Keyboard visits are left out."""
+    """Lobby visits come newest-first, as returned by residents._fetch_games. Keyboard visits are left out."""
     usable = [v for v in visits if not v.get("is_synthetic") and v["status"] in ("completed", "abandoned")
               and v.get("games")]
     base = {"source": "lobby", "usable_sessions": len(usable), "synthetic": False, "disclaimer": DISCLAIMER}
@@ -389,7 +389,7 @@ MODEL_WATCH = 50.0
 MODEL_CHECK = 70.0
 
 # Model output keys -> the neutral wording caregivers and the assistant see. The keys are condition
-# names only because of how the training folders are labelled (tcn/config.py); no condition name is
+# names only because of how the training folders are labelled (ml/pattern_model/config.py); no condition name is
 # ever shown. Each score is resemblance to that movement pattern, not a diagnosis.
 # Keep in step with web/src/components/liveData.ts.
 PATTERN_LABELS = {
@@ -493,6 +493,6 @@ def add_model_concerns(insights: dict, garden_sessions: List[dict], kind: str = 
 def _concern_raw(cid, title, level, summary, evidence, contributors, checks):
     return {"id": cid, "title": title, "level": level, "summary": summary, "evidence": evidence,
             "possible_contributors": contributors, "recommended_checks": checks,
-            "references": ["Stick Drift movement pattern model (tcn/), trained on teammate-acted and synthetic "
+            "references": ["Stick Drift movement pattern model (ml/pattern_model/), trained on teammate-acted and synthetic "
                            "recordings. Scores are pattern resemblance, not clinical validation."],
             "measurements": []}

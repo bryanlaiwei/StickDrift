@@ -1,10 +1,10 @@
 // Cloudflare Worker for the Stick Drift website.
 // `wrangler deploy` builds the Vite app in web/ first, then uploads web/dist as static files.
-// Requests to /api/* run cloudflare/worker.js, which forwards them to the FastAPI backend at BACKEND_URL.
+// Requests to /api/* run deploy/worker.js, which forwards them to the FastAPI backend at BACKEND_URL.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "stickdrift",
-  "main": "cloudflare/worker.js",
+  "main": "deploy/worker.js",
   "compatibility_date": "2025-09-01",
   "build": {
     "command": "cd web && npm ci && npm run build"

@@ -202,7 +202,7 @@ export interface GameSession {
   games_finished: LobbyGame[]
   /** Pattern-model scores for Apple Picking + Harbour Fishing; null until scored or without a trained model. */
   tcn?: (TcnResult & { by_game?: Partial<Record<LobbyGame, { scores: PatternScores }>> }) | null
-  /** The full visit report (visit/report.py), including Rat Catching timing. */
+  /** The full visit report (ml/visit_report/report.py), including Rat Catching timing. */
   visit?: { games?: { rat?: RatReport | null } } | null
   /** A reconstructed-hands GIF was stored for this visit (handReplayUrl). Older visits have none. */
   has_hand_replay?: boolean

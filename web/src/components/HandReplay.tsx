@@ -22,7 +22,7 @@ function altText(info: HandReplayInfo | null | undefined, name?: string) {
 }
 
 /**
- * One visit's reconstructed hands: a short looping GIF of the 3D hands and controller (hand_replay/).
+ * One visit's reconstructed hands: a short looping GIF of the 3D hands and controller (ml/hand_replay/).
  * `pending` shows a quiet placeholder while the GIF is still being drawn; a missing GIF shows nothing.
  */
 export function HandReplay({

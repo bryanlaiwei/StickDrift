@@ -38,15 +38,14 @@ from pydantic import BaseModel, Field
 from . import hand_replays
 from .auth import current_caregiver, current_senior
 from .db import pool
-from .live_metrics import SessionMetrics, game_summary
+from .measurements import SessionMetrics, game_summary
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["live"])
 
 ROOT = Path(__file__).resolve().parents[2]
-GAME_SCRIPT = ROOT / "Controller Data - Zain" / "Games" / "garden.py"
+GAME_SCRIPT = ROOT / "legacy" / "garden" / "garden.py"
 GAME_PYTHON = Path(os.environ.get("STICKDRIFT_GAME_PYTHON", ROOT / ".venv" / "bin" / "python"))
-SCORER = ROOT / "backend" / "scripts" / "score_garden.py"
 LOG_DIR = ROOT / "data" / ".live-logs"
 API_URL = os.environ.get("STICKDRIFT_API_URL", "http://127.0.0.1:8000")
 TIMEZONE = os.environ.get("GARDEN_RECORDING_TIMEZONE", "America/Toronto")
@@ -65,7 +64,7 @@ KEEP_EVENTS = {"trial", "wrong", "basket", "expired", "result", "trace", "slam",
 MAX_FRAMES = 24000       # a visit is a few minutes at 60 Hz; the report stops reading there
 MOTION_KEYS = ("gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z")
 
-# Applied at startup (and kept in backend/schema.sql), so a database set up before
+# Applied at startup (and kept in backend/sql/schema.sql), so a database set up before
 # sessions moved out of the API's memory needs no manual step.
 SCHEMA_SQL = """
 ALTER TABLE live_sessions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'garden';
@@ -95,7 +94,7 @@ def ensure_schema():
         with pool.connection() as conn:
             conn.execute(SCHEMA_SQL)
     except Exception:
-        log.exception("Could not add the live-session columns; apply backend/schema.sql by hand")
+        log.exception("Could not add the live-session columns; apply backend/sql/schema.sql by hand")
 
 
 def _now():
@@ -338,14 +337,14 @@ def _prune_db():
 
 # ---- garden game: end of session ------------------------------------------------
 
-MODEL = ROOT / "runs" / "tcn" / "model.pt"
+MODEL = ROOT / "ml" / "runs" / "pattern_model" / "model.pt"
 GARDEN_PROCS: Dict[UUID, subprocess.Popen] = {}  # garden games this process launched on this computer
 
 
 def _score(folder: str) -> dict:
     if not MODEL.is_file():
-        raise RuntimeError("the pattern model has not been trained yet; train it to create runs/tcn/model.pt")
-    out = subprocess.run([str(GAME_PYTHON), str(SCORER), folder], cwd=ROOT, capture_output=True,
+        raise RuntimeError("the pattern model has not been trained yet; train it to create ml/runs/pattern_model/model.pt")
+    out = subprocess.run([str(GAME_PYTHON), "-m", "ml.pattern_model.score_garden", folder], cwd=ROOT, capture_output=True,
                          text=True, timeout=300)
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip().splitlines()[-1] if out.stderr.strip() else "scorer failed")
@@ -513,13 +512,13 @@ def my_garden(me: dict = Depends(current_senior)):
 # The 3D lobby (web/lobby.html) runs in the resident's own browser tab. It opens a
 # live session here with their login cookie and streams its stick samples to
 # /live/ingest like the garden game does. When the tab closes, the visit's in-game
-# samples and events are read back from live_samples/live_events, visit.report
+# samples and events are read back from live_samples/live_events, ml.visit_report
 # scores Apple Picking and Harbour Fishing and counts Rat Catching, and that
 # document is stored with the visit.
 
 LOBBY_IDLE_S = 60        # a lobby tab that stopped posting this long ago is ended
 REPORT_TIMEOUT_S = 180
-REPLAY_TIMEOUT_S = 120   # drawing the reconstructed-hands GIF (hand_replay.from_capture)
+REPLAY_TIMEOUT_S = 120   # drawing the reconstructed-hands GIF (ml.hand_replay.from_capture)
 REPLAY_WAIT_S = 600      # how long a drawn GIF waits for the visit's session_id before it is dropped
 REPORT_RETRY_S = REPORT_TIMEOUT_S + 120  # a visit still "scoring" after this lost its API mid-report
 
@@ -537,7 +536,7 @@ def _holds_frames(value) -> bool:
 def _run_report(capture: dict) -> dict:
     python = str(GAME_PYTHON) if GAME_PYTHON.is_file() else sys.executable
     out = subprocess.run(
-        [python, "-m", "visit.report"],
+        [python, "-m", "ml.visit_report.report"],
         input=json.dumps(capture),
         text=True,
         capture_output=True,
@@ -559,7 +558,7 @@ def _run_hand_replay(capture: dict) -> Tuple[bytes, dict]:
     with tempfile.TemporaryDirectory(prefix="stickdrift-hands-") as tmp:
         gif_path = Path(tmp) / "hands.gif"
         out = subprocess.run(
-            [python, "-m", "hand_replay.from_capture", "--out", str(gif_path)],
+            [python, "-m", "ml.hand_replay.from_capture", "--out", str(gif_path)],
             input=json.dumps(capture),
             text=True,
             capture_output=True,
@@ -716,7 +715,7 @@ _CAPTURE_COLUMNS = (("t", "t"), ("trial", "trial"), ("phase", "phase"),
 
 
 def _load_capture(live_id: UUID) -> dict:
-    """The visit's in-game frames and events, per game, in the shape visit.report reads."""
+    """The visit's in-game frames and events, per game, in the shape ml.visit_report reads."""
     capture = {name: {"frames": [], "events": []} for name in LOBBY_GAMES}
     columns = ", ".join(col for _, col in _CAPTURE_COLUMNS) + ", " + ", ".join(MOTION_KEYS)
     with pool.connection() as conn:

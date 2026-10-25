@@ -12,7 +12,7 @@ hreem-folder/
 
 # Recordings and generated datasets stay on disk; do not sync them
 data/
-runs/*
-!runs/tcn/
-runs/tcn/*
-!runs/tcn/model.pt
+ml/runs/*
+!ml/runs/pattern_model/
+ml/runs/pattern_model/*
+!ml/runs/pattern_model/model.pt

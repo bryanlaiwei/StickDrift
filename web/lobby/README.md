@@ -1,6 +1,6 @@
 # 3D lobby (browser version)
 
-A three.js port of the Blender lobby in `../blender_hub`: grandma walks a top-down arena to three pads, each
+A three.js port of the Blender lobby in `../../legacy/blender_lobby`: grandma walks a top-down arena to three pads, each
 opening a first-person game. No Blender needed - just a browser and (ideally) a PS5/Xbox controller.
 
 ```bash
@@ -49,4 +49,4 @@ the choice is remembered. There is no start screen: the lobby opens straight int
 
 There is an exit door in the garden fence, right behind where grandma starts. Walk to it (the leaf swings open) and press
 Cross: the live session is ended (`live.end()`) and the page goes back to the dashboard at `/`. The Blender version has the
-same door; it stops the play loop and opens `DASHBOARD_URL` (set near the top of `blender_hub/hub_world.py`) in your browser.
+same door; it stops the play loop and opens `DASHBOARD_URL` (set near the top of `legacy/blender_lobby/hub_world.py`) in your browser.

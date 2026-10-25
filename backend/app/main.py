@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import assistant, auth, live, live_stream, report, views
+from . import assistant, auth, clinician_report, live, live_stream, residents
 from .db import pool
 
 
@@ -30,9 +30,9 @@ app.add_middleware(
     allow_credentials=True,  # the login cookie needs this on cross-origin calls
 )
 app.include_router(auth.router)
-app.include_router(views.router)
+app.include_router(residents.router)
 app.include_router(assistant.router)
-app.include_router(report.router)
+app.include_router(clinician_report.router)
 app.include_router(live.router)
 app.include_router(live_stream.router)
 
