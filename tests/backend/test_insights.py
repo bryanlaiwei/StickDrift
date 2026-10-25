@@ -96,7 +96,7 @@ class AssistantTest(unittest.TestCase):
     def profile(self, visits):
         ins = insights.add_model_concerns(insights.analyze(visits), visits)
         return {"display_name": "Ada", "dominant_hand": "right", "insights": ins,
-                "game_sessions": visits, "review": insights.review_from(ins)}
+                "visits": visits, "review": insights.review_from(ins)}
 
     def test_every_condition_name_is_refused(self):
         for text in ("resembles Parkinson's", "a stroke pattern", "essential tremor", "possible PD"):

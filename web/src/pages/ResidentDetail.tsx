@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api, type GameSession, type Insights, type ResidentDetail as Detail } from '../api'
+import { api, type Visit, type Insights, type ResidentDetail as Detail } from '../api'
 import { Assistant } from '../components/Assistant'
 import { GameVisits } from '../components/GameVisits'
 import { ConcernCard, RiskAlert, RiskBadge } from '../components/Insights'
@@ -102,13 +102,13 @@ export default function ResidentDetail() {
           </h1>
           <p className="muted">
             {data.dominant_hand === 'unknown' ? 'Dominant hand not set' : `${data.dominant_hand}-handed`} ·{' '}
-            {data.game_sessions.length} {data.game_sessions.length === 1 ? 'visit' : 'visits'}
+            {data.visits.length} {data.visits.length === 1 ? 'visit' : 'visits'}
           </p>
         </div>
-        <ReportButton id={data.participant_id} />
+        <ReportButton id={data.resident_id} />
       </header>
 
-      <LiveNow participantId={data.participant_id} compact />
+      <LiveNow residentId={data.resident_id} compact />
       <RiskAlert name={data.display_name} insights={insights} onSeeDetails={() => setTab('overview')} />
 
       <Tabs<TabKey>
@@ -118,18 +118,18 @@ export default function ResidentDetail() {
         items={[
           { key: 'overview', label: 'Overview' },
           { key: 'trends', label: 'Trends' },
-          { key: 'games', label: 'Game visits', badge: data.game_sessions.length || null },
+          { key: 'games', label: 'Game visits', badge: data.visits.length || null },
           { key: 'ask', label: 'Ask the assistant' },
         ]}
       />
 
       <TabPanel>
         {tab === 'overview' && <Overview data={data} insights={insights} />}
-        {tab === 'trends' && <Trends visits={data.game_sessions} />}
-        {tab === 'games' && <GameVisits visits={data.game_sessions} name={data.display_name} />}
+        {tab === 'trends' && <Trends visits={data.visits} />}
+        {tab === 'games' && <GameVisits visits={data.visits} name={data.display_name} />}
         {tab === 'ask' && (
           <Assistant
-            participantId={data.participant_id}
+            residentId={data.resident_id}
             name={data.display_name}
             suggestions={[
               `Why was ${data.display_name} flagged?`,
@@ -145,11 +145,11 @@ export default function ResidentDetail() {
 }
 
 function Overview({ data, insights }: { data: Detail; insights: Insights }) {
-  const latestGame = data.game_sessions[0]
+  const latestGame = data.visits[0]
 
   return (
     <>
-      {latestGame && <LatestJudgement visits={data.game_sessions} />}
+      {latestGame && <LatestJudgement visits={data.visits} />}
       {insights.concerns.length > 0 ? (
         <section id="concerns" aria-label="Potential health concerns">
           <p className="muted section-note">{insights.disclaimer}</p>
@@ -172,7 +172,7 @@ function Overview({ data, insights }: { data: Detail; insights: Insights }) {
   )
 }
 
-function LatestJudgement({ visits }: { visits: GameSession[] }) {
+function LatestJudgement({ visits }: { visits: Visit[] }) {
   const visit = visits[0]
   const rat = visit.visit?.games?.rat
   return (
@@ -186,7 +186,7 @@ function LatestJudgement({ visits }: { visits: GameSession[] }) {
   )
 }
 
-function Trends({ visits }: { visits: GameSession[] }) {
+function Trends({ visits }: { visits: Visit[] }) {
   return (
     <section className="panel">
       <p className="muted panel-lede">Each point is one visit to the game lobby, oldest on the left.</p>

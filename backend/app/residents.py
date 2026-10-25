@@ -30,19 +30,19 @@ class ConcernBrief(BaseModel):
 
 
 class ResidentRow(BaseModel):
-    participant_id: UUID
+    resident_id: UUID
     username: Optional[str]
     display_name: str
     dominant_hand: str
-    session_count: int
+    visit_count: int
     last_played_at: Optional[Any]
     review: Review
     risk: str
     concerns: List[ConcernBrief]
 
 
-class GameSession(BaseModel):
-    """One visit to the web lobby: per-game results keyed apple / fish / rat."""
+class Visit(BaseModel):
+    """One visit to the lobby: per-game results keyed apple / fish / rat."""
     session_id: UUID
     started_at: Any
     completed_at: Optional[Any]
@@ -57,16 +57,16 @@ class GameSession(BaseModel):
 
 
 class ResidentDetail(BaseModel):
-    participant_id: UUID
+    resident_id: UUID
     username: Optional[str]
     display_name: str
     dominant_hand: str
     review: Review
     insights: dict
-    game_sessions: List[GameSession]
+    visits: List[Visit]
 
 
-def _fetch_games(conn, participant_id: UUID) -> List[dict]:
+def _fetch_visits(conn, resident_id: UUID) -> List[dict]:
     replay = hand_replays.meta_sql("s.session_id") if hand_replays.exists(conn) else "NULL::jsonb"
     rows = conn.execute(
         f"""SELECT s.session_id, s.started_at, s.completed_at, s.status, s.is_synthetic,
@@ -78,7 +78,7 @@ def _fetch_games(conn, participant_id: UUID) -> List[dict]:
            LEFT JOIN session_summaries ss ON ss.session_id = s.session_id
            WHERE s.participant_id = %s AND s.protocol_version LIKE 'lobby-%%'
            ORDER BY s.started_at DESC LIMIT 50""",
-        (participant_id,),
+        (resident_id,),
     ).fetchall()
     for row in rows:
         row["has_hand_replay"] = row["hand_replay"] is not None
@@ -92,29 +92,27 @@ def _sweep():
         pass  # a failed sweep must never block the caregiver's view; it retries on the next visit
 
 
-def resident_profile(conn, participant_id: UUID) -> Optional[dict]:
+def resident_profile(conn, resident_id: UUID) -> Optional[dict]:
     p = conn.execute(
-        "SELECT participant_id, username, alias, dominant_hand FROM participants WHERE participant_id = %s",
-        (participant_id,),
+        "SELECT username, alias, dominant_hand FROM participants WHERE participant_id = %s",
+        (resident_id,),
     ).fetchone()
     if p is None:
         return None
-    games = _fetch_games(conn, participant_id)
-    insights = add_model_concerns(analyze(games), games)
-    insights["game_visits"] = len(games)
+    visits = _fetch_visits(conn, resident_id)
+    insights = add_model_concerns(analyze(visits), visits)
+    insights["visit_count"] = len(visits)
     return {
-        "participant_id": p["participant_id"], "username": p["username"],
+        "resident_id": resident_id, "username": p["username"],
         "display_name": p["alias"], "dominant_hand": p["dominant_hand"],
         "review": review_from(insights), "insights": insights,
-        "game_sessions": games,
+        "visits": visits,
     }
 
 
 def all_profiles(conn) -> List[dict]:
     ids = conn.execute(
-        """SELECT p.participant_id FROM participants p
-           WHERE p.username IS NOT NULL
-           ORDER BY p.alias"""
+        "SELECT participant_id FROM participants WHERE username IS NOT NULL ORDER BY alias"
     ).fetchall()
     return [resident_profile(conn, r["participant_id"]) for r in ids]
 
@@ -131,11 +129,11 @@ def residents(_: dict = Depends(current_caregiver)):
         profiles = all_profiles(conn)
     out = []
     for p in profiles:
-        latest = p["game_sessions"][:1]
+        latest = p["visits"][:1]
         out.append({
-            "participant_id": p["participant_id"], "username": p["username"],
+            "resident_id": p["resident_id"], "username": p["username"],
             "display_name": p["display_name"], "dominant_hand": p["dominant_hand"],
-            "session_count": len(p["game_sessions"]),
+            "visit_count": len(p["visits"]),
             "last_played_at": latest[0]["started_at"] if latest else None,
             "review": p["review"], "risk": p["insights"]["risk"],
             "concerns": p["insights"]["concerns"],
@@ -144,11 +142,11 @@ def residents(_: dict = Depends(current_caregiver)):
     return out
 
 
-@router.get("/caregiver/residents/{participant_id}", response_model=ResidentDetail)
-def resident_detail(participant_id: UUID, _: dict = Depends(current_caregiver)):
+@router.get("/caregiver/residents/{resident_id}", response_model=ResidentDetail)
+def resident_detail(resident_id: UUID, _: dict = Depends(current_caregiver)):
     _sweep()
     with pool.connection() as conn:
-        profile = resident_profile(conn, participant_id)
+        profile = resident_profile(conn, resident_id)
     if profile is None:
         raise HTTPException(404, "Resident not found.")
     return profile

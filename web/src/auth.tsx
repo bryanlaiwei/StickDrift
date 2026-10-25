@@ -5,8 +5,8 @@ import { api, ApiError, type Hand, type Me, type Role } from './api'
 interface AuthState {
   me: Me | null
   loading: boolean
-  loginSenior: (username: string, password: string) => Promise<void>
-  signupSenior: (username: string, password: string, hand: Hand) => Promise<void>
+  loginResident: (username: string, password: string) => Promise<void>
+  signupResident: (username: string, password: string, hand: Hand) => Promise<void>
   loginCaregiver: (username: string, password: string) => Promise<void>
   signupCaregiver: (username: string, password: string, displayName: string, inviteCode: string) => Promise<void>
   logout: () => Promise<void>
@@ -28,9 +28,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
-  const loginSenior = useCallback(async (u: string, p: string) => setMe(await api.loginSenior(u, p)), [])
-  const signupSenior = useCallback(
-    async (u: string, p: string, h: Hand) => setMe(await api.signupSenior(u, p, h)),
+  const loginResident = useCallback(async (u: string, p: string) => setMe(await api.loginResident(u, p)), [])
+  const signupResident = useCallback(
+    async (u: string, p: string, h: Hand) => setMe(await api.signupResident(u, p, h)),
     [],
   )
   const signupCaregiver = useCallback(
@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ me, loading, loginSenior, signupSenior, loginCaregiver, signupCaregiver, logout }}>
+    <AuthContext.Provider value={{ me, loading, loginResident, signupResident, loginCaregiver, signupCaregiver, logout }}>
       {children}
     </AuthContext.Provider>
   )

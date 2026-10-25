@@ -15,7 +15,7 @@ function Root() {
   const { me, loading } = useAuth()
   if (loading) return <p className="wrap page-pad muted">Loading…</p>
   if (me?.role === 'caregiver') return <Navigate to="/caregiver" replace />
-  if (me?.role === 'senior') return <Home />
+  if (me?.role === 'resident') return <Home />
   return <Welcome />
 }
 

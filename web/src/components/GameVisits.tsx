@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import type { GameResult, GameSession, HandLive, LobbyGame, RatReport } from '../api'
+import type { GameResult, Visit, HandLive, LobbyGame, RatReport } from '../api'
 import { formatDateTime } from '../format'
 import { HandReplay } from './HandReplay'
 import { RatPoints } from './LiveCharts'
@@ -88,13 +88,13 @@ const MORE: Record<LobbyGame, Row[]> = {
   rat: [{ label: 'Reaction time', value: (h) => secs(h.reaction_s), compare: compareTime('reaction_s') }],
 }
 
-function stateOf(v: GameSession, g: LobbyGame): State {
+function stateOf(v: Visit, g: LobbyGame): State {
   if (!v.games[g]) return 'none'
   return v.games_finished.includes(g) ? 'done' : 'early'
 }
 
 /** Short plain-language result for one game, for the card headline and the history table. */
-function headline(v: GameSession, g: LobbyGame): string | null {
+function headline(v: Visit, g: LobbyGame): string | null {
   const r = v.games[g]
   if (!r) return null
   const { left: l, right: rt } = r.hands
@@ -127,7 +127,7 @@ function compareText(row: Row, hand: 'left' | 'right', cur: GameResult, prev: Ga
 const list = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`)
 
 /** Which games were played, left early or not played, with a plain sentence saying so. */
-function StatusStrip({ visit, name }: { visit: GameSession; name: string }) {
+function StatusStrip({ visit, name }: { visit: Visit; name: string }) {
   const states = ORDER.map((g) => [g, stateOf(visit, g)] as const)
   const live = visit.status === 'in_progress'
   const names = (s: State) => states.filter(([, x]) => x === s).map(([g]) => GAME_NAMES[g])
@@ -220,7 +220,7 @@ function MeasureTable({ rows, cur, prev }: { rows: Row[]; cur: GameResult; prev:
 
 function GameCard({
   game, visit, prev, rat,
-}: { game: LobbyGame; visit: GameSession; prev: GameResult | null; rat?: RatReport | null }) {
+}: { game: LobbyGame; visit: Visit; prev: GameResult | null; rat?: RatReport | null }) {
   const result = visit.games[game]
   const state = stateOf(visit, game)
   if (!result) {
@@ -254,7 +254,7 @@ function GameCard({
   )
 }
 
-export function GameVisits({ visits, name }: { visits: GameSession[]; name: string }) {
+export function GameVisits({ visits, name }: { visits: Visit[]; name: string }) {
   const [handsOpen, setHandsOpen] = useState<ReadonlySet<string>>(() => new Set())
   const toggleHands = (id: string) =>
     setHandsOpen((open) => {

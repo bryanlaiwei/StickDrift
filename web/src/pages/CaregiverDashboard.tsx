@@ -49,8 +49,8 @@ export default function CaregiverDashboard() {
           <div className="resident-grid">
             {rows.map((r) => (
               <Link
-                key={r.participant_id}
-                to={`/caregiver/residents/${r.participant_id}`}
+                key={r.resident_id}
+                to={`/caregiver/residents/${r.resident_id}`}
                 className={`resident-card ${r.risk !== 'none' ? `resident-card-flag resident-card-${r.risk}` : ''}`}
               >
                 <div className="resident-card-head">
@@ -60,8 +60,8 @@ export default function CaregiverDashboard() {
                   <div>
                     <span className="resident-name">{r.display_name}</span>
                     <span className="resident-meta">
-                      {r.dominant_hand === 'unknown' ? 'hand not set' : `${r.dominant_hand}-handed`} · {r.session_count}{' '}
-                      {r.session_count === 1 ? 'session' : 'sessions'}
+                      {r.dominant_hand === 'unknown' ? 'hand not set' : `${r.dominant_hand}-handed`} · {r.visit_count}{' '}
+                      {r.visit_count === 1 ? 'visit' : 'visits'}
                     </span>
                   </div>
                   <RiskBadge risk={r.risk} />

@@ -65,7 +65,7 @@ class Turn(BaseModel):
 
 class Ask(BaseModel):
     question: str = Field(min_length=1, max_length=500)
-    participant_id: Optional[UUID] = None
+    resident_id: Optional[UUID] = None
     history: List[Turn] = Field(default_factory=list, max_length=12)
 
 
@@ -81,7 +81,7 @@ class Answer(BaseModel):
 
 def _resident_facts(p: dict, full: bool) -> str:
     ins = p["insights"]
-    games = p.get("game_sessions", [])
+    games = p["visits"]
     lines = [f"RESIDENT: {p['display_name']} (dominant hand: {p['dominant_hand']}, recorded activity: "
              f"{len(games)} game visits; {ins['usable_visits']} with the controller usable for a baseline)",
              f"Overall: risk level '{ins['risk']}'. {ins['summary']}"]
@@ -234,7 +234,7 @@ def _rules_answer(q: str, profiles: List[dict], focus: Optional[dict]) -> str:
 
     if ins["status"] != "ok":
         out = [f"{name}: {ins['summary']}"]
-        latest = next((g for g in focus.get("game_sessions", []) if not g.get("is_synthetic") and g.get("games")), None)
+        latest = next((g for g in focus["visits"] if not g.get("is_synthetic") and g.get("games")), None)
         if latest is not None:
             out.append(f"Latest game visit ({_when(latest['started_at'])}):")
             out += [f"- {game}: {text}" for game, text in game_parts(latest)]
@@ -287,8 +287,8 @@ def _gemini(facts: str, body: Ask) -> Optional[str]:
 def ask(body: Ask, _: dict = Depends(current_caregiver)):
     with pool.connection() as conn:
         focus = None
-        if body.participant_id is not None:
-            focus = resident_profile(conn, body.participant_id)
+        if body.resident_id is not None:
+            focus = resident_profile(conn, body.resident_id)
             if focus is None:
                 raise HTTPException(404, "Resident not found.")
         profiles = [focus] if focus else all_profiles(conn)

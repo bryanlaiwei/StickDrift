@@ -2,7 +2,7 @@
 
 Call `finish_visit` with the in-memory frames and the short event list from
 Apple Picking, Harbour Fishing, and Rat Catching. Apple and Fishing are scored
-by the pattern model. Rat Catching is counted from what the player did. The
+by the pattern model. Rat Catching is counted from what the resident did. The
 returned document is what gets stored. The frames are not part of it.
 
 Shake, tracking error and the per-hand reach numbers come from

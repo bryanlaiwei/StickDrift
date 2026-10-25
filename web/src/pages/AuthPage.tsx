@@ -67,7 +67,7 @@ const LEVELS = ['', 'Short', 'Okay', 'Good', 'Strong']
 
 export default function AuthPage({ who, mode }: { who: Who; mode: Mode }) {
   useNightRoom()
-  const { me, loginSenior, signupSenior, loginCaregiver, signupCaregiver } = useAuth()
+  const { me, loginResident, signupResident, loginCaregiver, signupCaregiver } = useAuth()
   const navigate = useNavigate()
   const from = (useLocation().state as { from?: string } | null)?.from ?? (who === 'caregiver' ? '/caregiver' : '/')
   const [username, setUsername] = useState('')
@@ -91,8 +91,8 @@ export default function AuthPage({ who, mode }: { who: Who; mode: Mode }) {
     setError(null)
     try {
       if (who === 'resident') {
-        if (isSignup) await signupSenior(username, password, hand)
-        else await loginSenior(username, password)
+        if (isSignup) await signupResident(username, password, hand)
+        else await loginResident(username, password)
       } else if (isSignup) await signupCaregiver(username, password, displayName, inviteCode)
       else await loginCaregiver(username, password)
       navigate(from, { replace: true })

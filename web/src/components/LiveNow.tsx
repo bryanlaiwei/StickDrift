@@ -27,8 +27,8 @@ function topPattern(b: LiveBrief) {
   return { label: PATTERN_LABELS[key] ?? key, value }
 }
 
-/** Live and recently finished lobby sessions. With participantId, only that resident's. */
-export function LiveNow({ participantId, compact }: { participantId?: string; compact?: boolean }) {
+/** Live and recently finished lobby sessions. With residentId, only that resident's. */
+export function LiveNow({ residentId, compact }: { residentId?: string; compact?: boolean }) {
   const [items, setItems] = useState<LiveBrief[] | null>(null)
 
   useEffect(() => {
@@ -47,7 +47,7 @@ export function LiveNow({ participantId, compact }: { participantId?: string; co
   }, [])
 
   if (items === null) return null
-  const mine = participantId ? items.filter((b) => b.participant_id === participantId) : items
+  const mine = residentId ? items.filter((b) => b.resident_id === residentId) : items
   const active = mine.filter((b) => ACTIVE.includes(b.status))
   const recent = mine.filter((b) => !ACTIVE.includes(b.status)).slice(0, 3)
 

@@ -4,11 +4,11 @@ import { api, type AssistantAnswer, type ChatTurn } from '../api'
 type Message = ChatTurn & { meta?: AssistantAnswer }
 
 export function Assistant({
-  participantId,
+  residentId,
   name,
   suggestions,
 }: {
-  participantId?: string
+  residentId?: string
   name?: string
   suggestions: string[]
 }) {
@@ -31,7 +31,7 @@ export function Assistant({
     setBusy(true)
     setError(null)
     try {
-      const res = await api.askAssistant(q, history, participantId)
+      const res = await api.askAssistant(q, history, residentId)
       setMessages((m) => [...m, { role: 'assistant', text: res.answer, meta: res }])
     } catch (e) {
       setError((e as Error).message)
@@ -91,11 +91,11 @@ export function Assistant({
       )}
 
       <form className="assistant-form" onSubmit={onSubmit}>
-        <label htmlFor={`ask-${participantId ?? 'all'}`} className="sr-only">
+        <label htmlFor={`ask-${residentId ?? 'all'}`} className="sr-only">
           Ask a question
         </label>
         <input
-          id={`ask-${participantId ?? 'all'}`}
+          id={`ask-${residentId ?? 'all'}`}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={name ? `e.g. Why was ${name} flagged?` : 'e.g. Who needs a check today?'}

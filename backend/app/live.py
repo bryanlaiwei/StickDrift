@@ -31,7 +31,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from . import hand_replays
-from .auth import current_caregiver, current_senior
+from .auth import current_caregiver, current_resident
 from .db import pool
 from .measurements import MOTION_KEYS, SAMPLE_KEYS, SessionMetrics, game_summary
 
@@ -105,9 +105,9 @@ def _num(v) -> Optional[float]:
 class LiveSession:
     """One live session's state, loaded from live_sessions for each request and written back after it."""
 
-    def __init__(self, participant_id: UUID, name: str, keyboard: bool, live_id: Optional[UUID] = None):
+    def __init__(self, resident_id: UUID, name: str, keyboard: bool, live_id: Optional[UUID] = None):
         self.id = live_id or uuid4()
-        self.participant_id = participant_id
+        self.resident_id = resident_id
         self.name = name
         self.keyboard = keyboard
         self.lock = threading.Lock()
@@ -202,7 +202,7 @@ def _create(s: LiveSession) -> str:
                (live_id, participant_id, name, status, levels, token_hash, keyboard, synthetic, host,
                 running, started_at, updated_at)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())""",
-            (s.id, s.participant_id, s.name, s.status, Jsonb(s.levels), _token_hash(token), s.keyboard, s.synthetic, HOST,
+            (s.id, s.resident_id, s.name, s.status, Jsonb(s.levels), _token_hash(token), s.keyboard, s.synthetic, HOST,
              Jsonb(s.metrics.to_state()), s.created_at),
         )
         conn.execute("SELECT pg_notify(%s, %s)", (CHANNEL, json.dumps({"i": str(s.id), "st": 1})))
@@ -415,7 +415,7 @@ def _store_visit(s: LiveSession, report: dict) -> UUID:
     finished = metrics["levels_completed"]
     with s.lock:
         synthetic = s.synthetic
-        participant_id = s.participant_id
+        resident_id = s.resident_id
         started = s.created_at
     with pool.connection() as conn:
         conn.execute(
@@ -423,7 +423,7 @@ def _store_visit(s: LiveSession, report: dict) -> UUID:
                (session_id, participant_id, mode, protocol_version, connection, placement,
                 status, quality, is_synthetic, started_at, completed_at)
                VALUES (%s, %s, 'free_play', 'lobby-v1', %s, 'other', %s, 'good', %s, %s, now())""",
-            (session_id, participant_id, "simulated" if synthetic else "unknown",
+            (session_id, resident_id, "simulated" if synthetic else "unknown",
              "completed" if finished else "abandoned", synthetic, started),
         )
         conn.execute(
@@ -737,7 +737,7 @@ class LobbyStart(BaseModel):
 
 
 @router.post("/me/lobby/start", status_code=201)
-def lobby_start(body: LobbyStart, me: dict = Depends(current_senior)):
+def lobby_start(body: LobbyStart, me: dict = Depends(current_resident)):
     _prune_lobby()
     with pool.connection() as conn:
         old = [r["live_id"] for r in conn.execute(
@@ -797,7 +797,7 @@ def _brief(row: dict) -> dict:
         error = error or ("The resident's lobby tab stopped sending updates, so it was probably closed or "
                           "went offline. The games played so far are saved.")
     return {
-        "live_id": row["live_id"], "participant_id": row["participant_id"], "name": row["name"],
+        "live_id": row["live_id"], "resident_id": row["participant_id"], "name": row["name"],
         "status": status, "level": row["level"], "levels": row["levels"], "levels_done": row["levels_done"],
         "synthetic": row["synthetic"], "started_at": row["started_at"],
         "elapsed_s": round(float(row["elapsed_s"]), 1), "tcn_scores": row["tcn_scores"],

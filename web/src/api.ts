@@ -3,7 +3,7 @@
 const API = '/api'
 
 export type Hand = 'left' | 'right' | 'unknown'
-export type Role = 'senior' | 'caregiver'
+export type Role = 'resident' | 'caregiver'
 
 export interface Me {
   role: Role
@@ -57,7 +57,7 @@ export interface Insights {
   summary: string
   disclaimer: string
   usable_visits: number
-  game_visits?: number
+  visit_count?: number
   baseline_visits: number
   recent_visit_ids: string[]
   findings: Finding[]
@@ -65,11 +65,11 @@ export interface Insights {
 }
 
 export interface ResidentRow {
-  participant_id: string
+  resident_id: string
   username: string | null
   display_name: string
   dominant_hand: Hand
-  session_count: number
+  visit_count: number
   last_played_at: string | null
   review: Review
   risk: Risk
@@ -126,13 +126,13 @@ export interface LiveMetrics {
 }
 
 export interface ResidentDetail {
-  participant_id: string
+  resident_id: string
   username: string | null
   display_name: string
   dominant_hand: Hand
   review: Review
   insights: Insights
-  game_sessions: GameSession[]
+  visits: Visit[]
 }
 
 export type LobbyGame = 'apple' | 'fish' | 'rat'
@@ -147,7 +147,7 @@ export interface GameResult {
   finished: boolean
 }
 
-export interface GameSession {
+export interface Visit {
   session_id: string
   started_at: string
   completed_at: string | null
@@ -191,7 +191,7 @@ export type LiveStatus = 'ready' | 'playing' | 'scoring' | 'finished' | 'failed'
 
 export interface LiveBrief {
   live_id: string
-  participant_id: string
+  resident_id: string
   name: string
   status: LiveStatus
   level: string | null
@@ -307,10 +307,10 @@ export const handReplayUrl = (sessionId: string) => `${API}/caregiver/sessions/$
 
 export const api = {
   me: () => request<Me>('/auth/me'),
-  loginSenior: (username: string, password: string) =>
-    post<Me>('/auth/senior/login', { username, password }),
-  signupSenior: (username: string, password: string, dominant_hand: Hand) =>
-    post<Me>('/auth/senior/signup', { username, password, dominant_hand }),
+  loginResident: (username: string, password: string) =>
+    post<Me>('/auth/resident/login', { username, password }),
+  signupResident: (username: string, password: string, dominant_hand: Hand) =>
+    post<Me>('/auth/resident/signup', { username, password, dominant_hand }),
   signupCaregiver: (username: string, password: string, display_name: string, invite_code: string) =>
     post<Me>('/auth/caregiver/signup', { username, password, display_name, invite_code }),
   loginCaregiver: (username: string, password: string) =>
@@ -328,6 +328,6 @@ export const api = {
   caregiverLive: () => request<LiveBrief[]>('/caregiver/live'),
   caregiverLiveSnapshot: (id: string, since: number) =>
     request<LiveSnapshot>(`/caregiver/live/${id}?since=${since}`),
-  askAssistant: (question: string, history: ChatTurn[], participantId?: string) =>
-    post<AssistantAnswer>('/caregiver/assistant', { question, history, participant_id: participantId ?? null }),
+  askAssistant: (question: string, history: ChatTurn[], residentId?: string) =>
+    post<AssistantAnswer>('/caregiver/assistant', { question, history, resident_id: residentId ?? null }),
 }

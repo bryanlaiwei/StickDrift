@@ -1,9 +1,9 @@
-import type { GameSession } from '../api'
+import type { Visit } from '../api'
 import { formatDateTime } from '../format'
 import { PatternBars, hasPatternScores } from './LiveCharts'
 
 /** Why a lobby visit has no pattern scores, in words a caregiver can act on. */
-function unscoredReason(v: GameSession): string {
+function unscoredReason(v: Visit): string {
   if (v.status === 'in_progress') return 'The latest visit is still going. Its scores appear when the resident leaves the lobby.'
   if (!v.games.apple && !v.games.fish) {
     return 'The latest visit had no Apple Picking or Harbour Fishing, the two games the pattern model scores.'
@@ -17,7 +17,7 @@ function unscoredReason(v: GameSession): string {
  * The pattern chart for a resident's lobby visits (newest first). It is always drawn: from the latest visit
  * when that was scored, otherwise from the most recent scored visit, otherwise empty, with a note saying why.
  */
-export function VisitPatterns({ visits }: { visits: GameSession[] }) {
+export function VisitPatterns({ visits }: { visits: Visit[] }) {
   const latest = visits[0]
   const shown = visits.find((v) => hasPatternScores(v.tcn?.scores))
   return (

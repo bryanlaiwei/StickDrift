@@ -144,7 +144,7 @@ def _template_draft(p: dict) -> dict:
     """Same shape as the Gemini draft, built from the deterministic insights."""
     ins = p["insights"]
     if ins["status"] != "ok":
-        games = [g for g in p.get("game_sessions", []) if g["games"]]
+        games = [g for g in p["visits"] if g["games"]]
         if not games:
             return {"summary": ins["summary"],
                     "data_description": "No game visits are on record yet.",
@@ -244,7 +244,7 @@ def _localize(p: dict, tz: tzinfo) -> dict:
     def conv(rows):
         return [{**r, "started_at": r["started_at"].astimezone(tz)} if hasattr(r["started_at"], "astimezone") else r
                 for r in rows]
-    return {**p, "game_sessions": conv(p.get("game_sessions", []))}
+    return {**p, "visits": conv(p["visits"])}
 
 
 def _zone(name: Optional[str]) -> tzinfo:
@@ -354,7 +354,7 @@ def _per_hand(rows: List[dict], get) -> List[tuple]:
 
 def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo = timezone.utc) -> bytes:
     ins = p["insights"]
-    games = [g for g in p.get("game_sessions", []) if g["games"]]  # newest first
+    games = [g for g in p["visits"] if g["games"]]  # newest first
     keyboard = sum(1 for g in games if g["is_synthetic"])
     now = datetime.now(tz)
     buf = BytesIO()
@@ -466,11 +466,11 @@ def build_pdf(p: dict, draft: dict, source: str, note: Optional[str], tz: tzinfo
     return buf.getvalue()
 
 
-@router.get("/caregiver/residents/{participant_id}/report.pdf")
-def report_pdf(participant_id: UUID, tz: Optional[str] = Query(None, max_length=64),
+@router.get("/caregiver/residents/{resident_id}/report.pdf")
+def report_pdf(resident_id: UUID, tz: Optional[str] = Query(None, max_length=64),
                _: dict = Depends(current_caregiver)):
     with pool.connection() as conn:
-        p = resident_profile(conn, participant_id)
+        p = resident_profile(conn, resident_id)
     if p is None:
         raise HTTPException(404, "Resident not found.")
     zone = _zone(tz)

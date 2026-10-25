@@ -117,7 +117,7 @@ export default function LiveSession() {
     <main className="wrap page-pad">
       <p className="crumb">
         <Link to="/caregiver">← All residents</Link> ·{' '}
-        <Link to={`/caregiver/residents/${snap.participant_id}`}>{snap.name}’s profile</Link>
+        <Link to={`/caregiver/residents/${snap.resident_id}`}>{snap.name}’s profile</Link>
       </p>
 
       <div className="page-head">
@@ -174,7 +174,7 @@ export default function LiveSession() {
               {snap.db_session_id && (
                 <p className="muted">
                   Saved to {snap.name}’s record.{' '}
-                  <Link to={`/caregiver/residents/${snap.participant_id}`}>Open profile</Link>
+                  <Link to={`/caregiver/residents/${snap.resident_id}`}>Open profile</Link>
                 </p>
               )}
             </>

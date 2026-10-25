@@ -1,6 +1,6 @@
-"""Two-role auth: seniors (players) and caregivers (viewers).
+"""Two-role auth: residents (who play) and caregivers (who review).
 
-Seniors are rows in `participants` with a username + password. Caregivers are
+Residents are rows in `participants` with a username + password. Caregivers are
 rows in `caregivers`. A login cookie (HttpOnly) maps to an `auth_sessions` row.
 """
 import hashlib
@@ -33,12 +33,14 @@ hasher = PasswordHasher()
 # whether or not the username exists.
 _DUMMY_HASH = hasher.hash(secrets.token_hex(16))
 
-Role = Literal["senior", "caregiver"]
+Role = Literal["resident", "caregiver"]
+# auth_sessions.role stores residents as 'senior'.
+_DB_ROLE = {"resident": "senior", "caregiver": "caregiver"}
 
 
 # ---- models --------------------------------------------------------------
 
-class SeniorSignup(BaseModel):
+class ResidentSignup(BaseModel):
     username: str = Field(max_length=64)
     password: str = Field(max_length=128)
     dominant_hand: Literal["left", "right", "unknown"] = "unknown"
@@ -80,7 +82,7 @@ def _start_session(conn, role: Role, account_id, response: Response) -> None:
     conn.execute(
         """INSERT INTO auth_sessions (token_hash, role, account_id, expires_at)
            VALUES (%s, %s, %s, now() + make_interval(hours => %s))""",
-        (_token_hash(token), role, account_id, SESSION_HOURS),
+        (_token_hash(token), _DB_ROLE[role], account_id, SESSION_HOURS),
     )
     response.set_cookie(
         COOKIE_NAME, token, max_age=SESSION_HOURS * 3600,
@@ -100,7 +102,7 @@ def _lookup(request: HTTPConnection) -> Optional[dict]:
         ).fetchone()
         if sess is None:
             return None
-        if sess["role"] == "senior":
+        if sess["role"] == _DB_ROLE["resident"]:
             row = conn.execute(
                 "SELECT participant_id AS account_id, username, alias, dominant_hand "
                 "FROM participants WHERE participant_id = %s AND username IS NOT NULL",
@@ -108,7 +110,7 @@ def _lookup(request: HTTPConnection) -> Optional[dict]:
             ).fetchone()
             if row is None:
                 return None
-            return {"role": "senior", "account_id": row["account_id"], "username": row["username"],
+            return {"role": "resident", "account_id": row["account_id"], "username": row["username"],
                     "display_name": row["alias"], "dominant_hand": row["dominant_hand"]}
         row = conn.execute(
             "SELECT caregiver_id AS account_id, username, display_name FROM caregivers WHERE caregiver_id = %s",
@@ -130,9 +132,9 @@ def current_account(request: Request) -> dict:
     return account
 
 
-def current_senior(request: Request) -> dict:
+def current_resident(request: Request) -> dict:
     account = current_account(request)
-    if account["role"] != "senior":
+    if account["role"] != "resident":
         raise HTTPException(403, "This area is for residents.")
     return account
 
@@ -144,10 +146,10 @@ def current_caregiver(request: Request) -> dict:
     return account
 
 
-# ---- senior auth ---------------------------------------------------------
+# ---- resident auth -------------------------------------------------------
 
-@router.post("/auth/senior/signup", response_model=Me, status_code=201)
-def senior_signup(body: SeniorSignup, response: Response):
+@router.post("/auth/resident/signup", response_model=Me, status_code=201)
+def resident_signup(body: ResidentSignup, response: Response):
     username = _normalize_username(body.username)
     if not USERNAME_RE.match(username):
         raise HTTPException(422, "Usernames are 3–24 letters, numbers, spaces, - or _.")
@@ -161,15 +163,15 @@ def senior_signup(body: SeniorSignup, response: Response):
                    RETURNING participant_id, alias, dominant_hand, username""",
                 (username, body.dominant_hand, username, hasher.hash(body.password)),
             ).fetchone()
-            _start_session(conn, "senior", row["participant_id"], response)
+            _start_session(conn, "resident", row["participant_id"], response)
     except psycopg.errors.UniqueViolation:
         raise HTTPException(409, "That username is taken. Try another.")
-    return {"role": "senior", "account_id": row["participant_id"], "username": row["username"],
+    return {"role": "resident", "account_id": row["participant_id"], "username": row["username"],
             "display_name": row["alias"], "dominant_hand": row["dominant_hand"]}
 
 
-@router.post("/auth/senior/login", response_model=Me)
-def senior_login(body: Login, response: Response):
+@router.post("/auth/resident/login", response_model=Me)
+def resident_login(body: Login, response: Response):
     username = _normalize_username(body.username)
     with pool.connection() as conn:
         row = conn.execute(
@@ -183,8 +185,8 @@ def senior_login(body: Login, response: Response):
             row = None
         if row is None:
             raise HTTPException(401, "Username or password is incorrect.")
-        _start_session(conn, "senior", row["participant_id"], response)
-    return {"role": "senior", "account_id": row["participant_id"], "username": row["username"],
+        _start_session(conn, "resident", row["participant_id"], response)
+    return {"role": "resident", "account_id": row["participant_id"], "username": row["username"],
             "display_name": row["alias"], "dominant_hand": row["dominant_hand"]}
 
 

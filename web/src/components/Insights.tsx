@@ -25,7 +25,7 @@ export function RiskAlert({
       <div className="risk-alert risk-alert-none" role="status">
         <div className="risk-alert-body">
           <strong>
-            {insights.game_visits ? 'Game visits recorded' : 'Building a baseline'}
+            {insights.visit_count ? 'Game visits recorded' : 'Building a baseline'}
           </strong>
           <p>{insights.summary}</p>
         </div>

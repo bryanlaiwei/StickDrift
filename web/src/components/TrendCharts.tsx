@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import type { GameSession, HandLive } from '../api'
+import type { Visit, HandLive } from '../api'
 import { visitLabels } from '../format'
 import { Tabs } from './Tabs'
 
@@ -137,7 +137,7 @@ const GAME_TABS: { key: GameKey; label: string }[] = [
 ]
 
 /** One line per hand across web lobby visits, for the headline measurement of each game. */
-export function GameTrendCharts({ visits }: { visits: GameSession[] }) {
+export function GameTrendCharts({ visits }: { visits: Visit[] }) {
   const ordered = visits.slice().reverse()
   const played = (g: GameKey) => ordered.filter((v) => v.games[g])
   const [view, setView] = useState<GameKey>(() => GAME_TABS.find((t) => played(t.key).length >= 2)?.key ?? 'apple')
