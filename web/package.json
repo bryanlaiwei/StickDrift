@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node ../tests/web/lobby_measure.mjs && node ../tests/web/rat_timing.mjs",
+    "test": "node ../tests/web/lobby_measure.mjs && node ../tests/web/lobby_games.mjs && node ../tests/web/live_stream.mjs && node ../tests/web/rat_timing.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
