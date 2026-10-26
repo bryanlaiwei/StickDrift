@@ -69,7 +69,7 @@ Each game shows a score and up to three stars. Those are just for fun.
   - how each hand's reaction time, speed and steadiness change from visit to visit
   - each game's results: apples picked, time on the fishing path, rats caught
   - the model's 0–100 scores for slower movements, one hand weaker than the other, and shake, which correspond to signs of Parkinson's, stroke and essential tremor
-- Ask the assistant about a resident, answered only from their recorded numbers.
+- Ask the AI assistant about a resident, answered only from their recorded numbers.
 - Download a one-page PDF report for a nurse or doctor.
 
 ## The model
