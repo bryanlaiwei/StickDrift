@@ -61,11 +61,9 @@ The model is a small neural network (a temporal convolutional network in PyTorch
 | One hand weaker or slower than the other | Stroke |
 | Rhythmic shake while moving | Essential tremor |
 
-Caregivers only ever see the left column's neutral wording. The app never names a condition.
+These scores drive the dashboard. A score of 50 or more marks a resident "Keep an eye on", and two visits in a row at 70 or more mark them "Check soon". The resident page charts the scores across visits next to the plain measurements, so a caregiver can see what changed and what it resembles.
 
-These scores drive the dashboard. A score of 50 or more marks a resident "Keep an eye on", and two visits in a row at 70 or more mark them "Check soon". The resident page charts the scores across visits next to the plain measurements, so a caregiver can see what changed as well as what it resembles.
-
-**Why a model instead of fixed formulas?** Because these signs are hard to write down as formulas. Parkinson's slowness shows up as movements that shrink and slow as they continue [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/), and tremor as shake that appears only while the hand moves [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas). A formula would need a hand-picked cutoff for each of these, which would be guesses. The model instead learns what each pattern looks like from labelled examples.
+**Why a model instead of fixed formulas?** Because these signs are hard to write down as formulas. Parkinson's slowness shows up as movements that shrink and slow as they continue [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/), and tremor as shake that appears only while the hand moves [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas). A formula would need a hand-picked cutoff for each of these, which would be guesses. The model instead learns each pattern from labelled examples.
 
 The model was trained on recordings of the team acting out each pattern, plus synthetic data. The trained checkpoint is committed at `ml/runs/pattern_model/model.pt`.
 
