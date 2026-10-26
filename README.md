@@ -88,15 +88,15 @@ The model was trained on recordings of the team acting out each pattern, plus sy
 
 ## Research basis
 
-**Measuring movement with game controllers is established research.** Off-the-shelf joysticks and game peripherals have been used to assess movement disorders for years. A standard game joystick and steering wheel told people with Parkinson's apart from healthy adults, and graded how slow their movements were, using tracking tasks much like Harbour Fishing [[1]](https://eprints.whiterose.ac.uk/2663). A joystick graded arm impairment in stroke survivors [[2]](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/). Simple reaching tasks detected stroke deficits, most clearly as differences between the two arms [[3]](https://pubmed.ncbi.nlm.nih.gov/20233965). Stick Drift applies the same measurements through a controller residents enjoy.
+**Game controllers have been used for this before.** Researchers have used off-the-shelf joysticks and game peripherals to assess movement disorders for years. A standard game joystick told people with Parkinson's apart from healthy adults, using tracking tasks much like Harbour Fishing [[1]](https://eprints.whiterose.ac.uk/2663). A joystick graded arm impairment in stroke survivors [[2]](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/), and reaching tasks picked up stroke most clearly as a difference between the two arms [[3]](https://pubmed.ncbi.nlm.nih.gov/20233965).
 
-**What the model looks for comes from clinical criteria.** Each pattern is the movement sign clinicians use:
+**What the model looks for comes from clinical criteria,** and each condition is common in older adults, where catching it early matters:
 
-- **Parkinson's:** the core sign is bradykinesia, slowness with movements that shrink or slow as they continue [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/).
-- **Stroke:** sudden weakness on one side of the body is a key warning sign [[5]](https://cpr.heart.org/-/media/Files/Health-Topics/Answers-by-Heart/What-Are-the-Warning-Signs-of-Stroke.pdf), which is why Apple Picking compares the two hands.
-- **Essential tremor:** defined by action tremor in both arms [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas), which is why shake is measured while the hand moves.
-
-**These conditions are common in older adults, and catching them early matters.** About 6.1 million people had Parkinson's in 2016, more than double the 1990 figure, driven mainly by ageing populations [[7]](https://www.healthdata.org/node/6677). Essential tremor affects about 1 in 20 people over 65 [[8]](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8269764/). Stroke risk rises with age [[9]](https://www.cdc.gov/stroke/data-research/facts-stats/index.html).
+| Condition | Clinical sign the model looks for | How common |
+|---|---|---|
+| Parkinson's | Slowness, with movements that shrink as they continue [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/) | 6.1 million people in 2016, more than double 1990, driven by ageing [[7]](https://www.healthdata.org/node/6677) |
+| Stroke | Sudden weakness on one side of the body [[5]](https://cpr.heart.org/-/media/Files/Health-Topics/Answers-by-Heart/What-Are-the-Warning-Signs-of-Stroke.pdf) | Risk rises with age [[9]](https://www.cdc.gov/stroke/data-research/facts-stats/index.html) |
+| Essential tremor | Shake in both arms while moving [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas) | About 1 in 20 people over 65 [[8]](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8269764/) |
 
 1. [Allen et al., 2007](https://eprints.whiterose.ac.uk/2663). Low-cost computer peripherals for assessing motor dysfunction in Parkinson's.
 2. [Feng & Winters, 2009](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/). A joystick platform for upper-limb assessment after stroke.
