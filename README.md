@@ -49,7 +49,25 @@ flowchart LR
 
 The resident plays in a three.js lobby in Chrome or Edge. The controller's sticks come in through the Gamepad API, and its gyroscope and accelerometer through WebHID when the resident turns on motion sensors. `web/lobby/measure.js` watches each game without changing it and streams samples (60 per second) and in-game events (a reach started, an apple picked, a rat slammed) to the API.
 
-Samples first go to a short-lived live buffer in the database, which powers the caregiver's live view and is cleared after a day. Postgres `NOTIFY` tells every watching API about new data, and each pushes it to its caregivers over a WebSocket, about a tenth of a second behind the resident. When the resident leaves, only what's worth analysing is kept permanently: the in-game movement, the per-game results and the model's scores. Walking around the lobby and the menus are dropped.
+Samples first go to a short-lived live buffer in the database, which powers the caregiver's live view and is cleared after a day. Postgres `NOTIFY` tells every watching API about new data, and each pushes it to its caregivers over a WebSocket, about a tenth of a second behind the resident. When the resident leaves, the visit's in-game movement is sent to a machine-learning model, which scores how closely each hand's movement resembles three patterns linked to Parkinson's, stroke and essential tremor. Only what's worth analysing is kept permanently: the in-game movement, the per-game results and the model's scores. Walking around the lobby and the menus are dropped.
+
+## The model
+
+The model is a small neural network (a temporal convolutional network in PyTorch) that reads the raw movement of each hand from Apple Picking and Harbour Fishing. For each of three patterns it gives a score from 0 to 100: the model's confidence that the visit looks like that pattern.
+
+| What the model looks for | Sign of |
+|---|---|
+| Slower, smaller movements in both hands | Parkinson's |
+| One hand weaker or slower than the other | Stroke |
+| Rhythmic shake while moving | Essential tremor |
+
+Caregivers only ever see the left column's neutral wording. The app never names a condition.
+
+These scores drive the dashboard. A score of 50 or more marks a resident "Keep an eye on", and two visits in a row at 70 or more mark them "Check soon". The resident page charts the scores across visits next to the plain measurements, so a caregiver can see what changed as well as what it resembles.
+
+**Why a model instead of fixed formulas?** Each pattern is a shape over time, not one number. Parkinson's slowness is movement that gets smaller and slower as it goes on [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/). Tremor is shake that shows up while the hand is moving [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas). Formulas with hand-picked cutoffs for speed or shake miss those shapes and break across people and games. The network learns them from examples. Stick Drift keeps the formulas for the readable numbers and uses the model for the patterns.
+
+The model was trained on recordings of the team acting out each pattern, plus synthetic data. The trained checkpoint is committed at `ml/runs/pattern_model/model.pt`.
 
 ## What you can do
 
@@ -72,35 +90,17 @@ Each game shows a score and up to three stars. Those are just for fun.
 - Ask the AI assistant about a resident, answered only from their recorded numbers.
 - Download a one-page PDF report for a nurse or doctor.
 
-## The model
-
-At the end of each visit, a small neural network (a temporal convolutional network in PyTorch) reads the raw movement of each hand from Apple Picking and Harbour Fishing. For each of three patterns it gives a score from 0 to 100: the model's confidence that the visit looks like that pattern.
-
-| What the model looks for | Sign of |
-|---|---|
-| Slower, smaller movements in both hands | Parkinson's |
-| One hand weaker or slower than the other | Stroke |
-| Rhythmic shake while moving | Essential tremor |
-
-Caregivers only ever see the left column's neutral wording. The app never names a condition.
-
-These scores drive the dashboard. A score of 50 or more marks a resident "Keep an eye on", and two visits in a row at 70 or more mark them "Check soon". The resident page charts the scores across visits next to the plain measurements, so a caregiver can see what changed as well as what it resembles.
-
-**Why a model instead of fixed formulas?** Each pattern is a shape over time, not one number. Parkinson's slowness is movement that gets smaller and slower as it goes on [4]. Tremor is shake that shows up while the hand is moving [6]. Formulas with hand-picked cutoffs for speed or shake miss those shapes and break across people and games. The network learns them from examples. Stick Drift keeps the formulas for the readable numbers and uses the model for the patterns.
-
-The model was trained on recordings of the team acting out each pattern, plus synthetic data. The trained checkpoint is committed at `ml/runs/pattern_model/model.pt`.
-
 ## Research basis
 
-**Measuring movement with game controllers is established research.** Off-the-shelf joysticks and game peripherals have been used to assess movement disorders for years. A standard game joystick and steering wheel told people with Parkinson's apart from healthy adults, and graded how slow their movements were, using tracking tasks much like Harbour Fishing [1]. A joystick graded arm impairment in stroke survivors [2]. Simple reaching tasks detected stroke deficits, most clearly as differences between the two arms [3]. Stick Drift applies the same measurements through a controller residents enjoy.
+**Measuring movement with game controllers is established research.** Off-the-shelf joysticks and game peripherals have been used to assess movement disorders for years. A standard game joystick and steering wheel told people with Parkinson's apart from healthy adults, and graded how slow their movements were, using tracking tasks much like Harbour Fishing [[1]](https://eprints.whiterose.ac.uk/2663). A joystick graded arm impairment in stroke survivors [[2]](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/). Simple reaching tasks detected stroke deficits, most clearly as differences between the two arms [[3]](https://pubmed.ncbi.nlm.nih.gov/20233965). Stick Drift applies the same measurements through a controller residents enjoy.
 
 **What the model looks for comes from clinical criteria.** Each pattern is the movement sign clinicians use:
 
-- **Parkinson's:** the core sign is bradykinesia, slowness with movements that shrink or slow as they continue [4].
-- **Stroke:** sudden weakness on one side of the body is a key warning sign [5], which is why Apple Picking compares the two hands.
-- **Essential tremor:** defined by action tremor in both arms [6], which is why shake is measured while the hand moves.
+- **Parkinson's:** the core sign is bradykinesia, slowness with movements that shrink or slow as they continue [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/).
+- **Stroke:** sudden weakness on one side of the body is a key warning sign [[5]](https://cpr.heart.org/-/media/Files/Health-Topics/Answers-by-Heart/What-Are-the-Warning-Signs-of-Stroke.pdf), which is why Apple Picking compares the two hands.
+- **Essential tremor:** defined by action tremor in both arms [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas), which is why shake is measured while the hand moves.
 
-**These conditions are common in older adults, and catching them early matters.** About 6.1 million people had Parkinson's in 2016, more than double the 1990 figure, driven mainly by ageing populations [7]. Essential tremor affects about 1 in 20 people over 65 [8]. Stroke risk rises with age [9].
+**These conditions are common in older adults, and catching them early matters.** About 6.1 million people had Parkinson's in 2016, more than double the 1990 figure, driven mainly by ageing populations [[7]](https://www.healthdata.org/node/6677). Essential tremor affects about 1 in 20 people over 65 [[8]](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8269764/). Stroke risk rises with age [[9]](https://www.cdc.gov/stroke/data-research/facts-stats/index.html).
 
 1. [Allen et al., 2007](https://eprints.whiterose.ac.uk/2663). Low-cost computer peripherals for assessing motor dysfunction in Parkinson's.
 2. [Feng & Winters, 2009](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/). A joystick platform for upper-limb assessment after stroke.
