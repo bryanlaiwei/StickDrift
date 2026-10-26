@@ -47,9 +47,9 @@ flowchart LR
   ml --> db
 ```
 
-The resident plays in a three.js lobby in Chrome or Edge. The controller's sticks come in through the Gamepad API, and its gyroscope and accelerometer through WebHID when the resident turns on motion sensors. `web/lobby/measure.js` watches each game without changing it and streams samples (60 per second) and in-game events (a reach started, an apple picked, a rat slammed) to the API.
+The resident plays in a three.js lobby in Chrome or Edge, using the controller's sticks and, when turned on, its motion sensors. Each game streams hand samples (60 per second) and events, like an apple picked or a rat slammed, to the API.
 
-Samples first go to a short-lived live buffer in the database, which powers the caregiver's live view and is cleared after a day. Postgres `NOTIFY` tells every watching API about new data, and each pushes it to its caregivers over a WebSocket, about a tenth of a second behind the resident. When the resident leaves, the visit's in-game movement is sent to a machine-learning model, which scores how closely each hand's movement resembles three patterns linked to Parkinson's, stroke and essential tremor. Only what's worth analysing is kept permanently: the in-game movement, the per-game results and the model's scores. Walking around the lobby and the menus are dropped.
+The API keeps a short-lived live buffer in the database, cleared after a day, and pushes new samples to watching caregivers over a WebSocket. When the resident leaves, the visit's in-game movement is sent to a machine-learning model, which scores how closely each hand's movement resembles three patterns linked to Parkinson's, stroke and essential tremor. Only the in-game movement, the per-game results and the scores are kept, for building the caregiver dashboard that tracks each resident's movement from visit to visit.
 
 ## The model
 
