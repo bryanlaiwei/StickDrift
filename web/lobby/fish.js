@@ -1,6 +1,6 @@
 // Game 2 - Harbour Fishing. First person on a dock. The left stick moves the rod tip and traces a random shape
 // a fish is swimming along; then the right stick traces a second one; then both fish are reeled into the bucket.
-// Like trace.py: velocity-controlled cursor, lane tolerance, % on path. Port of the Blender version.
+// Velocity-controlled cursor, lane tolerance, score is the % of the path traced. Port of the Blender version.
 import * as THREE from 'three'
 import { addSun } from './lights.js'
 import { record } from './scores.js'
