@@ -21,10 +21,11 @@ Short, simple controller games designed for seniors. While a resident plays, a m
 </p>
 
 <p align="center">
-  <img src="web/public/lobby/lobby.jpg" alt="The lobby" width="24%" />
-  <img src="web/public/lobby/apple.jpg" alt="Apple Picking" width="24%" />
-  <img src="web/public/lobby/fish.jpg" alt="Harbour Fishing" width="24%" />
-  <img src="web/public/lobby/rat.jpg" alt="Rat Catching" width="24%" />
+  <a href="https://youtu.be/d01z2tL992U">
+    <img src="https://img.youtube.com/vi/d01z2tL992U/maxresdefault.jpg" alt="Watch the Stick Drift demo on YouTube" width="75%" />
+  </a>
+  <br />
+  <sub>▶ Watch the demo</sub>
 </p>
 
 > [!NOTE]
