@@ -1,221 +1,186 @@
-# 🕹️ Stick Drift
+<p align="center">
+  <img src="web/public/stickdrift-mark.svg" alt="Stick Drift" width="96" />
+</p>
 
-Controller games for senior-living and long-term-care residents that help care teams notice when someone's movement changes.
+# Stick Drift
 
-A resident logs in, opens a small 3D game lobby, and plays short games with a PS5 controller: picking apples, tracing a fish through a harbour, catching rats. While they play, Stick Drift measures how each hand moves: how quickly it reacts, how fast and far it reaches, how closely it follows a path, and how much it shakes. A caregiver on any computer can watch the session live, then review every visit, see trends over time, and ask an AI assistant about the results.
+Short controller games for senior-living and long-term-care residents. While a resident plays, Stick Drift measures how each hand moves, so their care team can notice a change and check in early.
 
-The output is **a change worth checking**, never a diagnosis. Stick Drift does not name conditions, predict disease, or decide whether something is an emergency. A nurse or caregiver reads the numbers, adds context, and decides what happens next.
+<p align="center">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB" alt="React" />
+  <img src="https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white" alt="Vite" />
+  <img src="https://img.shields.io/badge/three.js-000000?style=flat&logo=threedotjs&logoColor=white" alt="three.js" />
+  <img src="https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white" alt="PyTorch" />
+  <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/TimescaleDB-FDB515?style=flat&logo=timescale&logoColor=black" alt="TimescaleDB" />
+  <img src="https://img.shields.io/badge/Google_Gemini-8E75B2?style=flat&logo=googlegemini&logoColor=white" alt="Google Gemini" />
+  <img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
+</p>
 
-> 🏆 Built for Hack the Valley 11 (PointClickCare: Catch It Early). Live at [stickdrift.health](https://stickdrift.health).
+<p align="center">
+  <img src="web/public/lobby/lobby.jpg" alt="The lobby" width="24%" />
+  <img src="web/public/lobby/apple.jpg" alt="Apple Picking" width="24%" />
+  <img src="web/public/lobby/fish.jpg" alt="Harbour Fishing" width="24%" />
+  <img src="web/public/lobby/rat.jpg" alt="Rat Catching" width="24%" />
+</p>
 
-## ⚙️ How it works
+> [!NOTE]
+> Stick Drift was built in a weekend at **Hack the Valley 11** (October 2026) for **PointClickCare's "Catch It Early"** sponsor track, by Ayan Saiyed, Hreem Pandya, Zain Rizvi and Bryan Wei. This repository is a fork of the team's original, [AyanASaiyed/StickDrift](https://github.com/AyanASaiyed/StickDrift). After the event I cleaned up and reorganized the code and fixed a few measurement bugs. The product is the same one we built at the hackathon.
 
+## The problem
+
+In a care home, changes in how someone moves (slower reactions, one hand getting weaker, a new shake) are easy to miss between formal assessments, and the formal tests themselves are tiring. Stick Drift turns the check into a few minutes of play. The games are the part residents see. The measurement runs in the background, and the care team gets each resident's results over time compared with their own usual level.
+
+The output is always **a change worth checking**, never a diagnosis. Stick Drift does not name conditions or decide whether something is urgent. A nurse or caregiver reads the numbers and decides what happens next.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  pad["PS5 controller"] --> lobby["3D lobby and games<br/>(browser)"]
+  lobby -- "samples and events" --> api["FastAPI"]
+  api --> db["Postgres + TimescaleDB"]
+  db -- "LISTEN / NOTIFY" --> api
+  api -- "WebSocket" --> care["Caregiver dashboard"]
+  api -- "end of visit" --> ml["Pattern model<br/>and hand replay"]
+  ml --> db
 ```
-Resident's laptop                                         Caregiver's laptop (any computer)
-─────────────────                                         ─────────────────────────────────
-Browser: 3D lobby + games ──samples──► FastAPI ──┐   ┌──► FastAPI ──WebSocket──► Dashboard, live view,
-(PS5 pad via Gamepad API)                        ▼   │                             history, trends, assistant
-                                          Tiger Data (PostgreSQL + TimescaleDB)
-                                          live buffer · NOTIFY · history · samples
-```
 
-1. 🎮 **Play.** The resident logs in and clicks **Open the lobby**. They walk Grandma around a 3D lobby with the left stick and step onto a pad to start a game.
-2. 📡 **Stream.** The lobby sends stick samples, in-game hand and target positions, and one result per attempt to the resident's API, about ten times a second. That API writes them to Tiger Data and sends a Postgres `NOTIFY`.
-3. 👀 **Watch live.** Any caregiver's API `LISTEN`s and pushes updates to their browser over a WebSocket. The live view shows the sticks, distance from target and measurements as they happen, about 0.1 s behind the resident.
-4. 💾 **Save.** When the visit ends, it becomes a permanent session in the resident's history with per-game, per-hand results. Only in-game samples are kept for analysis and training. Walking around the lobby, menus and countdowns are dropped.
-5. 📈 **Review.** Caregivers see each resident's visits, trends across visits, any potential concerns with recommended checks, and can ask the assistant questions grounded in the recorded numbers.
+The resident plays in a three.js lobby in Chrome or Edge. The controller's sticks come in through the Gamepad API, and its gyroscope and accelerometer through WebHID when the resident turns on motion sensors. `web/lobby/measure.js` watches each game's state without changing it and streams samples (60 per second) and in-game events (a reach started, an apple picked, a rat slammed) to the API.
 
-The two laptops share nothing but the Tiger Data database. If the resident's API runs older code and sends no notifications, the caregiver's API reads new samples directly every 0.15 s, so the view stays live either way.
+The API stores the live session in the database and sends a Postgres `NOTIFY`. Every caregiver API that is watching `LISTEN`s and pushes the update to the browser over a WebSocket, so a caregiver on another computer sees the session about a tenth of a second behind. The database is the only shared state, so the API can run with several workers or on several laptops.
 
-## 🎮 The games
+When the resident leaves through the exit door, the visit is saved to their history. The API then runs the pattern model and draws a short GIF of the reconstructed hands and controller, both in a separate Python environment.
 
-### 🏠 Web lobby (main experience)
+## What you can do
 
-A three.js lobby that runs in the browser at `/lobby.html`. Residents open it from their home page in a new tab.
+**Residents** sign up with a nickname and their dominant hand, then walk Grandma around the lobby and step onto a pad to play:
 
 | Game | What the resident does | What it measures, per hand |
 | --- | --- | --- |
-| 🍎 **Apple Picking** | Steer a red glove (left stick) and a blue glove (right stick) to matching apples, then carry them to the basket | Apples picked, time to pick, reaction time, peak speed, how far the stick was pushed |
-| 🎣 **Harbour Fishing** | Trace a glowing lane with the fishing lure, one hand at a time | Distance from the lane, share of time on the lane, shake and its rhythm |
-| 🐀 **Rat Catching** | Flick a stick up to slam the hand when the target rat runs underneath | Target rats caught, time to slam, reaction time |
+| **Apple Picking** | Steer a red glove (left stick) and a blue glove (right stick) to matching apples and carry them to the basket | Reaction time, time to pick, peak speed, wrong-colour touches |
+| **Harbour Fishing** | Trace a fish's path with the rod tip, one hand at a time | Distance from the path, time on the path, shake and its rhythm |
+| **Rat Catching** | Flick a stick to slam a hand down when the target rat runs underneath, and hold back for the others | Target rats caught, wrong slams, reaction time |
 
-Controls: left stick walks, right stick moves the camera, Cross enters a game, Circle leaves it. A keyboard fallback exists (WASD, IJKL, Space, O); visits played that way are labelled **keyboard input** everywhere. Each game shows a score and 0–3 stars to the resident. Those are for fun and are separate from the caregiver measurements.
+Each game shows the resident a score and up to three stars. Those are just for fun and are separate from what caregivers see.
 
-The games move an in-game hand with the stick (velocity control), so distance from target compares that hand with its target, while speed and shake are read from the stick itself. The game logic lives in `web/lobby/*.js`. `web/lobby/measure.js` reads each game's state without changing it.
+**Caregivers** see:
 
-In Chrome or Edge, **Enable motion sensors** in the lobby opens the DualSense over WebHID (`web/lobby/motion.js`) and adds its gyroscope and accelerometer to the recording. Without it the games still work from the Gamepad API alone.
-
-Visits are stored only in Tiger Data. The API writes no recording files; the pattern model trains from local recordings (see [Training the pattern model](#training-the-pattern-model)).
-
-## 🩺 What caregivers see
-
-- **Dashboard** (`/caregiver`). Every resident with a risk badge ("No concerns", "Keep an eye on", "Check soon"), who is playing right now, and visits that just finished.
-- **Live view** (`/caregiver/live/:id`). Each in-game hand against its target, a rolling 20-second chart (distance from target or stick tilt), and measurements updating as the resident plays.
-- **Resident page** (`/caregiver/residents/:id`):
-  - **Overview.** Status banner and any potential concerns. Each concern shows what changed, what to check first, possible everyday reasons, and its research basis.
-  - **Trends.** One line per hand across visits: time to pick an apple, time on the fishing lane, time to slam a rat.
-  - **Game visits.** The latest visit as one card per game, the pattern chart for that visit, and a table of every visit. Visits recorded since hand replays were added also have a short **reconstructed hands** GIF (the 3D hands and controller during the busiest few seconds, shake drawn ×10); it is also shown at the end of the live view.
-  - **Ask the assistant.** Questions about this resident, answered from their recorded measurements.
-  - **Clinician report (PDF).** A one-click summary of visits, per-hand results, pattern scores and concerns for a nurse or doctor (`backend/app/clinician_report.py`). Gemini writes the short narrative under the same checks as the assistant, with a template fallback.
+- A **dashboard** of every resident with a status ("No concerns", "Keep an eye on", "Check soon"), who is playing right now, and visits that just finished.
+- A **live view** of each hand against its target, with measurements updating as the resident plays.
+- A **resident page** with trends per hand across visits, every visit's per-game results, the reconstructed-hands GIF, and any concerns, each with what changed and what to check first.
+- An **assistant** (Google Gemini) that answers questions from that resident's recorded numbers only. Answers that use a number not in the records are flagged, and answers that name a condition are replaced with a referral to a clinician.
+- A one-click **clinician report** as a PDF.
 
 The left hand is always red and the right hand always blue, in the games and on every chart.
 
-### 🤖 AI assistant and guardrails
+### How a visit is scored
 
-The assistant (Google Gemini, `backend/app/assistant.py`) receives only structured facts built from the database: measurements, changes from usual, concerns, recommended checks, and recent visits. Its answers are filtered before they are shown:
+Two things raise a concern:
 
-- Any number not present in the facts is flagged as unverified.
-- Answers that name a disease or condition are replaced with a referral to a clinician.
-- If the API key is missing or Gemini is unavailable, a rule-based answer built directly from the records is returned instead.
+- **Change from the resident's usual level.** From the fourth controller visit on, each result is compared with that resident's earlier visits.
+- **The pattern model** (`ml/pattern_model/`), a small temporal convolutional network in PyTorch. It scores Apple Picking and Harbour Fishing 0–100 for resemblance to three movement patterns: slower, smaller movements in both hands; one hand weaker or slower than the other; and rhythmic shake while moving. A score of 50 or more means "Keep an eye on", and two visits in a row at 70 or more mean "Check soon". Caregivers only ever see those neutral descriptions.
 
-Potential concerns come from fixed rules (latest result vs that resident's own usual level) and the pattern model below. A pattern score of 50 or more gives "Keep an eye on", and 70 or more gives "Check soon". Concerns name the model's pattern, such as "Stroke", as a resemblance score, never as a diagnosis.
+Rat Catching is not scored by the model. Its catches, wrong slams and reaction times are counted directly from the game.
 
-### 🧠 Pattern model (`ml/pattern_model/`)
+The model was trained by the team on recordings of ourselves acting out each pattern, plus synthetic data. The trained checkpoint is committed at `ml/runs/pattern_model/model.pt`. The recordings are not in the repository, so a clone can run the model but not retrain it.
 
-A temporal convolutional network (PyTorch) that scores each visit 0–100 for resemblance to three movement patterns. Caregivers only ever see the neutral label; the internal keys are condition names because of how the training folders are named.
+## Research basis
 
-- 🧓 **Slower, smaller movements in both hands** (key `parkinson`);
-- ✋ **One hand weaker or slower than the other** (key `stroke`);
-- 〰️ **Rhythmic shake while moving** (key `essential_tremor`).
+No published study uses a modern gamepad thumbstick for this exactly, so Stick Drift applies established movement measures to a cheap device people already enjoy. The work it builds on:
 
-One shared network reads short stretches of each hand's movement and gives two outputs per hand: shake and impairment. `parkinson` is the impairment both hands share, `stroke` is the gap between the hands, and `essential_tremor` is the higher shake score of the two hands.
+**Joysticks and game peripherals for movement disorders**
 
-When a lobby visit ends, `ml/visit_report/report.py` scores Apple Picking and Harbour Fishing with the model. The `parkinson` and `essential_tremor` scores are averaged across the two games; `stroke` comes from Apple Picking, the only game where both hands move together. **Rat Catching is not scored by the model.** Its correctness (target rats caught, misses, wrong slams) and reaction time are counted directly from the game's events.
+- [Allen et al., 2007](https://eprints.whiterose.ac.uk/2663). An unmodified game joystick and steering wheel, with tracking tasks much like Harbour Fishing, told people with Parkinson's from controls and separated patients by how slow their movements were. It was small (13 patients, 5 controls), and it is the closest precedent for Stick Drift.
+- [Feng & Winters, 2009](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/). A joystick platform for stroke survivors. Accuracy, steadiness and speed consistency separated patients by level of arm impairment.
 
-The model is trained locally by the team, on a laptop, from the lobby visits we played and recorded (plus synthetic data), and saved as `ml/runs/pattern_model/model.pt`. That file is committed to the repo, and the backend loads it from disk each time it scores a visit, including at demo time. Nothing is trained or downloaded while the app runs. It was not trained on patients. Each score is resemblance to a movement pattern, never a diagnosis or a disease probability. The assistant and report refuse every condition name. The model no longer scores diabetes or ataxia, and the loader skips the old recordings for those patterns.
+**Slower, smaller movements (Harbour Fishing and Apple Picking)**
 
-## 🚀 Running locally
+- [Oishi et al.](https://digital-library.theiet.org/content/journals/10.1049/iet-cta.2010.0464) and [a study of submovements in manual tracking](https://cris.iucc.ac.il/en/publications/submovements-in-manual-tracking-people-with-parkinsons-disease-pr/). People with Parkinson's make more tracking errors and more small corrective movements when following a moving target.
+- [Giancardo et al., 2016 (neuroQWERTY)](https://www.physionet.org/content/nqmitcsxpd/1.0.0/MIT-CS1PD/data_MIT-CS1PD/). How long keys are held down during ordinary typing flagged early Parkinson's in 85 people.
+- [Deep learning on mPower tapping, 2022](https://pmc.ncbi.nlm.nih.gov/articles/PMC8763910). Smartphone tapping from 6,418 people identified Parkinson's with an AUC of 0.93.
 
-You need Node 20+, Python 3.9+ for the backend, Python 3.14 with [uv](https://docs.astral.sh/uv/) for the pattern model and hand replays, Chrome or Edge, and a [Tiger Data](https://www.tigerdata.com/) service.
+**One hand weaker than the other (Apple Picking's left-right comparison)**
 
-**1. Database.** Create a service in Tiger Console and copy its connection string. The API applies `sql/schema.sql` when it starts (safe to re-run):
+- [Coderre et al., 2010](https://pubmed.ncbi.nlm.nih.gov/20233965). A robotic reaching task with 52 subacute stroke patients and 91 controls. Differences between the two arms stood out even when each arm looked normal on its own, which is why Stick Drift compares the hands with each other.
+
+**Shake**
+
+- [White & Horvitz, 2019](https://pmc.ncbi.nlm.nih.gov/articles/PMC6760188). Hand tremor estimated from ordinary mouse-cursor movement across a large population matched self-reports and clinical findings. Thumbstick evidence for tremor is thin, which is why Stick Drift also records the PS5 controller's motion sensors.
+
+**Tracking older adults over time**
+
+- [Haynes et al., 2017](https://eprints.whiterose.ac.uk/116209/). A review of 22 long-term studies: older adults whose reaction times vary more from one try to the next are at higher risk of later cognitive decline and death.
+- [Seelye et al., 2015](https://experts.umn.edu/en/publications/computer-mouse-movement-patterns-a-potential-marker-of-mild-cogni/). A week of ordinary home mouse use showed measurable differences in people with mild cognitive impairment, a precedent for monitoring through everyday activity.
+
+## Project structure
+
+| Path | Role |
+|---|---|
+| [`web/src`](web/src) | React site: welcome and login pages, resident home, caregiver dashboard, live view, resident page |
+| [`web/lobby`](web/lobby) | The 3D lobby and the three games (three.js). `measure.js` measures, `live.js` streams, `motion.js` reads the PS5 motion sensors |
+| [`backend/app`](backend/app) | FastAPI: accounts, live sessions, measurements, concerns, assistant, clinician report |
+| [`backend/sql/schema.sql`](backend/sql/schema.sql) | The database schema, applied by the API when it starts |
+| [`ml/pattern_model`](ml/pattern_model) | The pattern model: network, training and scoring |
+| [`ml/visit_report`](ml/visit_report) | Scores one finished visit |
+| [`ml/hand_replay`](ml/hand_replay) | Draws the reconstructed-hands GIF |
+| [`tests`](tests) | Backend, model and web tests |
+| [`docs`](docs) | Product brief and design notes, with the decision log |
+| [`deploy`](deploy) | Cloudflare Worker for the hosted site (config in `wrangler.jsonc`) |
+
+## Run it locally
+
+- [Node.js 20](https://nodejs.org/) or newer
+- Python 3.14 and [uv](https://docs.astral.sh/uv/)
+- Postgres with the TimescaleDB extension: [Docker Desktop](https://www.docker.com/products/docker-desktop/) for a local one, or a free [Tiger Data](https://www.tigerdata.com/) service
+- Chrome or Edge, and a PS5 (DualSense) controller
+
+**1. Database.** The quickest option is a local container:
 
 ```bash
-cd backend
-cp .env.example .env               # set DATABASE_URL (and the other variables below)
-psql "$DATABASE_URL" -f sql/schema.sql   # optional: the API also applies it at startup
+docker run -d --name stickdrift-db -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=stickdrift timescale/timescaledb:2.17.2-pg16
 ```
 
-**2. Backend.**
+**2. Settings.** Copy `backend/.env.example` to `backend/.env` and fill it in. Do not commit `.env`.
+
+| Variable | What it is |
+|---|---|
+| `DATABASE_URL` | The database connection string. For the container above: `postgresql://postgres:postgres@localhost:5432/stickdrift` |
+| `CAREGIVER_INVITE_CODE` | An access code you choose. Caregivers must enter it to sign up, because caregivers can see every resident's results. Leave it empty to turn caregiver sign-up off |
+| `GEMINI_API_KEY` | Optional. Turns on the Gemini assistant and the written part of the PDF |
+
+**3. API.** From the repository root:
 
 ```bash
+uv sync                                  # pattern model and hand replays (torch, numpy, ...)
 cd backend
-python3 -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m scripts.create_caregiver   # optional: a caregiver login (random password, printed once)
-uvicorn app.main:app --port 8000
+uvicorn app.main:app --port 8000         # creates the tables on first start
 ```
 
-**2b. Game and model environment.** When a lobby visit ends, the API runs the pattern model (`ml.visit_report`) and draws the reconstructed-hands GIF (`ml.hand_replay.from_capture`) in the root Python 3.14 environment, so install it once from the repository root:
-
-```bash
-uv sync                            # numpy, torch, scipy, matplotlib, pillow, ...
-```
-
-The API looks for `../.venv/bin/python`. On Windows that file does not exist, so set `STICKDRIFT_ML_PYTHON` in `backend/.env` to the full path of `.venv\Scripts\python.exe`. Without this environment the visit is still saved, but it has no pattern scores and no hand replay.
-
-**3. Web app.**
+**4. Website.** In a second terminal, from the repository root:
 
 ```bash
 cd web
 npm install
-npm run dev                        # http://localhost:5173 (the lobby is http://localhost:5173/lobby.html)
+npm run dev
 ```
 
-The Vite dev server proxies `/api` (including the live WebSocket) to `http://localhost:8000`, so the browser sees one origin and the login cookie just works. After pulling changes, restart both the API and the dev server.
+Open `http://localhost:5173`. Sign up as a resident and open the lobby from the home page. In a second browser profile or a private window, sign up as a caregiver at `/caregiver/signup` with your access code, and you can watch the resident play live.
 
-**4. Use it.**
+The Vite dev server forwards `/api`, including the live WebSocket, to the API on port 8000, so the browser sees a single origin.
 
-- Residents sign up at `/signup` and open the lobby from their home page.
-- Caregivers register at `/caregiver/signup` with the access code from `CAREGIVER_INVITE_CODE`, or use the account from `scripts/create_caregiver.py`.
+> [!TIP]
+> Without `GEMINI_API_KEY` everything still works: the assistant answers from fixed rules and the PDF uses template wording. Without an access code, run `python -m scripts.create_caregiver` in `backend/` for a caregiver login.
 
-For the cross-laptop setup, each laptop runs its own API and web app against the same `DATABASE_URL`.
+> [!IMPORTANT]
+> The API runs the pattern model with `../.venv/bin/python`, the environment `uv sync` creates. On Windows, set `STICKDRIFT_ML_PYTHON` in `backend/.env` to the full path of `.venv\Scripts\python.exe`. If the API can't find it, visits are still saved but have no pattern scores or hand replay.
 
-### 🔑 Environment variables (`backend/.env`)
-
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Tiger Data connection string (never commit it) |
-| `CAREGIVER_INVITE_CODE` | Access code required to register a caregiver; empty turns registration off |
-| `GEMINI_API_KEY` | Enables the AI assistant and the PDF narrative; without it the rule-based and template text are used |
-| `GEMINI_MODEL` | Optional model override (default `gemini-3.8-flash`, with fallbacks) |
-| `CORS_ORIGINS` | Allowed web origins, comma separated (default `http://localhost:5173`) |
-| `STICKDRIFT_ML_PYTHON` | Where the API finds the root uv environment's Python (visit report and hand replays; default `../.venv/bin/python`, on Windows set it to `.venv\Scripts\python.exe`) |
-
-### 🏋️ Training the pattern model
-
-The model trains in the root Python 3.14 environment (`uv sync`). Recordings are labelled by their folder names (Baseline, Parkinsons, Tremor, Stroke/Left Weak or Right Weak; see `ml/pattern_model/labels.py`):
-
-```bash
-uv run python -m ml.pattern_model.synthetic                                   # optional: writes data/Synthetic
-uv run python -c "from ml.pattern_model import fit, load_training_examples; fit(load_training_examples('data'))"
-```
-
-`load_training_examples` reads the apple and fishing recordings under `data/ultimate_data` and leaves out Rat Catching. Training writes `ml/runs/pattern_model/model.pt`; the checkpoint carries a schema version, so code and checkpoint from different versions refuse to load together. Restart the API after replacing it.
-
-## ☁️ Deployment
-
-The public site runs on Cloudflare:
-
-- A **Cloudflare Worker** (`wrangler.jsonc`, `deploy/worker.js`) builds `web/` and serves `web/dist`. It forwards `/api/*` to the FastAPI backend named by the Worker secret `BACKEND_URL`, so the login cookie and the live WebSocket stay on one origin. Pushing to `main` redeploys it through Cloudflare's GitHub integration.
-- The backend runs on a laptop behind a named **Cloudflare Tunnel** (`api.stickdrift.health` → `localhost:8000`). Add the site's origins (`https://stickdrift.health`, the `workers.dev` URL) to `CORS_ORIGINS`, or the live WebSocket is refused.
-- The pattern model needs the root `.venv` on the backend machine. Without it, visits are saved but not scored.
-
-## 🔒 Data and privacy
-
-Data lives in Tiger Data (managed PostgreSQL with TimescaleDB), so it leaves the laptop:
-
-- **Profiles** hold only a nickname or code and a dominant hand, never a real name or health information.
-- **Passwords** are hashed with argon2id, and logins use an HttpOnly session cookie.
-- **No camera, microphone or other biometric capture.**
-
-| Table | What it holds |
-| --- | --- |
-| `participants`, `caregivers`, `auth_sessions` | Accounts and logins |
-| `sessions`, `session_summaries` | One row per visit (`lobby-v1`) and its per-game, per-hand results |
-| `raw_samples` | Hypertable of in-game stick samples with target and in-game hand positions, tagged by game; the training data |
-| `live_sessions`, `live_samples`, `live_events` | Live sessions (state, token hash, samples, in-game events), cleared after a day; finished visits are copied to `sessions` and `raw_samples` first |
-| `session_hand_replays` | One reconstructed-hands GIF (under ~1.5 MB) per lobby visit, plus which game and window it shows |
-
-From the fourth game visit with the controller, a resident's latest visits are compared with their own earlier ones.
-
-## 🗂️ Project layout
-
-```
-backend/                     FastAPI API (its own venv, backend/requirements.txt)
-  app/main.py                App setup and health check
-  app/auth.py                Resident and caregiver accounts, login sessions, access code
-  app/live/                  Live lobby sessions: session.py (ingest and storage), visit.py (saving and scoring
-                             a finished visit), watch.py (caregiver reads), stream.py (WebSocket), routes.py
-  app/db.py                  Connection pool; applies sql/schema.sql at startup
-  app/measurements.py        Per-hand reach, tracking and shake: the one definition, also used by ml/visit_report
-  app/residents.py           Caregiver endpoints for residents and their visits
-  app/insights.py            Personal baseline, concerns and recommended checks
-  app/assistant.py           Caregiver assistant (Gemini, with grounding and wording checks)
-  app/clinician_report.py    Clinician PDF report
-  app/gemini.py              The Gemini client shared by the assistant and the report
-  app/hand_replays.py        Stores and serves each visit's reconstructed-hands GIF
-  sql/schema.sql             The Tiger Data schema (the only definition of it)
-  scripts/create_caregiver.py  A first caregiver login
-web/                         Website (React + Vite) and the browser lobby games
-  src/pages/                 Welcome, login, resident home, caregiver dashboard, live session, resident page
-  src/components/            live/ (live view), resident/ (resident page), charts/ (visit results), ui/ (shared)
-  src/styles/                Site-wide, live-view and caregiver styles, plus the evening-room theme
-  src/api.ts                 Every API call and type the site uses
-  lobby.html, lobby/         3D lobby and games (three.js); live.js streams, measure.js measures
-ml/                          Everything in the root uv environment (Python 3.14, torch)
-  pattern_model/             Movement pattern model: recordings, network, training, scoring
-  visit_report/              Scores a finished lobby visit (pattern model + Rat Catching counts)
-  hand_replay/               Reconstructed hands + controller GIFs
-  runs/pattern_model/        Trained checkpoint (model.pt)
-tests/
-  backend/  ml/  web/        Python (unittest) and Node tests for each part
-docs/                        What the app is and why (context.md, with the decision log), product brief
-deploy/worker.js             Cloudflare Worker that proxies /api (config: wrangler.jsonc at the root)
-data/                        Local recordings (gitignored)
-```
-
-**Running the tests** (from the repository root):
+To run the tests from the repository root:
 
 ```bash
 backend/.venv/bin/python -m unittest discover -s tests/backend -t .
@@ -223,31 +188,10 @@ MPLBACKEND=Agg .venv/bin/python -m unittest discover -s tests/ml -t .
 cd web && npm test && npm run lint && npm run build
 ```
 
-### 🔌 API
+## Limitations
 
-All caregiver routes need a caregiver login; `/me/*` routes need a resident login.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/auth/senior/signup`, `/auth/senior/login` | Resident accounts |
-| POST | `/auth/caregiver/signup`, `/auth/caregiver/login` | Caregiver accounts (signup needs the access code) |
-| GET / POST | `/auth/me`, `/auth/logout` | Current account, log out |
-| POST | `/me/lobby/start` | Open a live session for the lobby; returns a one-time stream token |
-| POST | `/live/ingest`, `/live/end` | Stream samples and events with the token; end the visit (saves it to history) |
-| GET | `/caregiver/residents`, `/caregiver/residents/{id}` | Residents with risk; one resident's visits, insights and concerns |
-| GET | `/caregiver/live`, `/caregiver/live/{id}` | Live and recently finished sessions; one session's state and samples |
-| GET | `/caregiver/sessions/{id}/hand-replay.gif` | A lobby visit's reconstructed-hands GIF (404 when it has none) |
-| WS | `/caregiver/live/{id}/ws` | Push stream of one live session |
-| POST | `/caregiver/assistant` | Ask the assistant about all residents or one |
-| GET | `/caregiver/residents/{id}/report.pdf` | Clinician PDF report (`?tz=` prints times in the reader's zone) |
-| GET | `/health` | Database reachable |
-
-Live sessions are kept in Tiger Data, so the API can run with more than one worker and a restart doesn't drop a visit in progress.
-
-## ⚠️ Limitations
-
-- This is a hackathon prototype, not a medical device, and it has not been clinically validated. All thresholds are untested design choices, not clinical cutoffs.
-- A change in results can come from fatigue, sleep, medication, vision, unfamiliarity with game controllers, how the controller is held, or a faulty device.
-- Lobby measurements are sampled at about 60 Hz in the browser, including display and network delay. They are not precise to the millisecond and are not a pure motor-speed measure.
-- The pattern model is trained on teammate-simulated and synthetic recordings only. Its scores have not been checked against real patients.
-- Anyone with a sudden new neurological symptom needs normal urgent care. Nobody should wait on a game score.
+- Stick Drift is a hackathon prototype, not a medical device, and it has not been clinically validated. The thresholds are design choices, not clinical cutoffs.
+- The pattern model was trained only on the team acting out each pattern and on synthetic data, never on patients.
+- A change in results can come from tiredness, medication, eyesight, unfamiliarity with game controllers or a faulty controller, not only a change in health.
+- Timing is measured in the browser at about 60 samples per second, so it includes display and network delay and is not precise to the millisecond.
+- Motion sensors need a PS5 controller in Chrome or Edge. Other gamepads drive the sticks only.
