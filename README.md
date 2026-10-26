@@ -4,7 +4,7 @@
 
 # Stick Drift
 
-Short controller games for senior-living and long-term-care residents. While a resident plays, Stick Drift measures how each hand moves, so their care team can notice a change and check in early.
+Short, simple controller games designed for seniors in care homes. While a resident plays, a model reads how each hand moves, so their care team can catch early signs of motion-related diseases like Parkinson's, stroke and essential tremor.
 
 <p align="center">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript" />
@@ -15,7 +15,7 @@ Short controller games for senior-living and long-term-care residents. While a r
   <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white" alt="PyTorch" />
   <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/TimescaleDB-FDB515?style=flat&logo=timescale&logoColor=black" alt="TimescaleDB" />
+  <img src="https://img.shields.io/badge/Tiger_Data-F5A623?style=flat" alt="Tiger Data" />
   <img src="https://img.shields.io/badge/Google_Gemini-8E75B2?style=flat&logo=googlegemini&logoColor=white" alt="Google Gemini" />
   <img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
 </p>
@@ -28,13 +28,11 @@ Short controller games for senior-living and long-term-care residents. While a r
 </p>
 
 > [!NOTE]
-> Stick Drift was built in a weekend at **Hack the Valley 11** (October 2026) for **PointClickCare's "Catch It Early"** sponsor track, by Ayan Saiyed, Hreem Pandya, Zain Rizvi and Bryan Wei. This repository is a fork of the team's original, [AyanASaiyed/StickDrift](https://github.com/AyanASaiyed/StickDrift). After the event I cleaned up and reorganized the code and fixed a few measurement bugs. The product is the same one we built at the hackathon.
+> Built at **Hack the Valley 11** for **PointClickCare's "Catch It Early"** sponsor track. This repository is a fork of the team's original, [AyanASaiyed/StickDrift](https://github.com/AyanASaiyed/StickDrift). After the event I cleaned up and reorganized the code and fixed bugs. The product is the same one we built at the hackathon.
 
 ## The problem
 
-In a care home, changes in how someone moves (slower reactions, one hand getting weaker, a new shake) are easy to miss between formal assessments, and the formal tests themselves are tiring. Stick Drift turns the check into a few minutes of play. The games are the part residents see. The measurement runs in the background, and the care team gets each resident's results over time compared with their own usual level.
-
-The output is always **a change worth checking**, never a diagnosis. Stick Drift does not name conditions or decide whether something is urgent. A nurse or caregiver reads the numbers and decides what happens next.
+Early signs of Parkinson's, stroke and essential tremor, like slower reactions, one hand getting weaker or a new shake, are easy to miss in the months between formal assessments, and those assessments are long and tiring. Stick Drift is something a resident can play every day: easy enough for anyone, fun enough to come back to, and measuring each hand's motion the whole time.
 
 ## How it fits together
 
@@ -42,79 +40,77 @@ The output is always **a change worth checking**, never a diagnosis. Stick Drift
 flowchart LR
   pad["PS5 controller"] --> lobby["3D lobby and games<br/>(browser)"]
   lobby -- "samples and events" --> api["FastAPI"]
-  api --> db["Postgres + TimescaleDB"]
+  api --> db["Tiger Data<br/>(Postgres + TimescaleDB)"]
   db -- "LISTEN / NOTIFY" --> api
   api -- "WebSocket" --> care["Caregiver dashboard"]
   api -- "end of visit" --> ml["Pattern model<br/>and hand replay"]
   ml --> db
 ```
 
-The resident plays in a three.js lobby in Chrome or Edge. The controller's sticks come in through the Gamepad API, and its gyroscope and accelerometer through WebHID when the resident turns on motion sensors. `web/lobby/measure.js` watches each game's state without changing it and streams samples (60 per second) and in-game events (a reach started, an apple picked, a rat slammed) to the API.
+The resident plays in a three.js lobby in Chrome or Edge. The controller's sticks come in through the Gamepad API, and its gyroscope and accelerometer through WebHID when the resident turns on motion sensors. `web/lobby/measure.js` watches each game without changing it and streams samples (60 per second) and in-game events (a reach started, an apple picked, a rat slammed) to the API.
 
-The API stores the live session in the database and sends a Postgres `NOTIFY`. Every caregiver API that is watching `LISTEN`s and pushes the update to the browser over a WebSocket, so a caregiver on another computer sees the session about a tenth of a second behind. The database is the only shared state, so the API can run with several workers or on several laptops.
-
-When the resident leaves through the exit door, the visit is saved to their history. The API then runs the pattern model and draws a short GIF of the reconstructed hands and controller, both in a separate Python environment.
+Samples first go to a short-lived live buffer in the database, which powers the caregiver's live view and is cleared after a day. Postgres `NOTIFY` tells every watching API about new data, and each pushes it to its caregivers over a WebSocket, about a tenth of a second behind the resident. When the resident leaves, only what's worth analysing is kept permanently: the in-game movement, the per-game results and the model's scores. Walking around the lobby and the menus are dropped.
 
 ## What you can do
 
-**Residents** sign up with a nickname and their dominant hand, then walk Grandma around the lobby and step onto a pad to play:
+**Residents** sign up with a nickname, open the lobby and walk to a game:
 
-| Game | What the resident does | What it measures, per hand |
-| --- | --- | --- |
-| **Apple Picking** | Steer a red glove (left stick) and a blue glove (right stick) to matching apples and carry them to the basket | Reaction time, time to pick, peak speed, wrong-colour touches |
-| **Harbour Fishing** | Trace a fish's path with the rod tip, one hand at a time | Distance from the path, time on the path, shake and its rhythm |
-| **Rat Catching** | Flick a stick to slam a hand down when the target rat runs underneath, and hold back for the others | Target rats caught, wrong slams, reaction time |
+- **Apple Picking:** steer a red glove and a blue glove to matching apples and drop them in the basket.
+- **Harbour Fishing:** trace a fish's path with the rod tip, one hand at a time.
+- **Rat Catching:** flick a stick to catch the target rat, and hold back for the others.
 
-Each game shows the resident a score and up to three stars. Those are just for fun and are separate from what caregivers see.
+Each game shows a score and up to three stars. Those are just for fun.
 
-**Caregivers** see:
+**Caregivers** sign up with the care team's access code, then:
 
-- A **dashboard** of every resident with a status ("No concerns", "Keep an eye on", "Check soon"), who is playing right now, and visits that just finished.
-- A **live view** of each hand against its target, with measurements updating as the resident plays.
-- A **resident page** with trends per hand across visits, every visit's per-game results, the reconstructed-hands GIF, and any concerns, each with what changed and what to check first.
-- An **assistant** (Google Gemini) that answers questions from that resident's recorded numbers only. Answers that use a number not in the records are flagged, and answers that name a condition are replaced with a referral to a clinician.
-- A one-click **clinician report** as a PDF.
+- See every resident on one dashboard, marked "No concerns", "Keep an eye on" or "Check soon", plus who is playing right now.
+- Watch a resident play live from any computer.
+- Open a resident's page to see:
+  - how each hand's reaction time, speed and steadiness change from visit to visit
+  - each game's results: apples picked, time on the fishing path, rats caught
+  - the model's 0–100 scores for slower movements, one hand weaker than the other, and shake, which correspond to signs of Parkinson's, stroke and essential tremor
+- Ask the assistant about a resident, answered only from their recorded numbers.
+- Download a one-page PDF report for a nurse or doctor.
 
-The left hand is always red and the right hand always blue, in the games and on every chart.
+## The model
 
-### How a visit is scored
+At the end of each visit, a small neural network (a temporal convolutional network in PyTorch) reads the raw movement of each hand from Apple Picking and Harbour Fishing. For each of three patterns it gives a score from 0 to 100: the model's confidence that the visit looks like that pattern.
 
-Two things raise a concern:
+| What the model looks for | Sign of |
+|---|---|
+| Slower, smaller movements in both hands | Parkinson's |
+| One hand weaker or slower than the other | Stroke |
+| Rhythmic shake while moving | Essential tremor |
 
-- **Change from the resident's usual level.** From the fourth controller visit on, each result is compared with that resident's earlier visits.
-- **The pattern model** (`ml/pattern_model/`), a small temporal convolutional network in PyTorch. It scores Apple Picking and Harbour Fishing 0–100 for resemblance to three movement patterns: slower, smaller movements in both hands; one hand weaker or slower than the other; and rhythmic shake while moving. A score of 50 or more means "Keep an eye on", and two visits in a row at 70 or more mean "Check soon". Caregivers only ever see those neutral descriptions.
+Caregivers only ever see the left column's neutral wording. The app never names a condition.
 
-Rat Catching is not scored by the model. Its catches, wrong slams and reaction times are counted directly from the game.
+These scores drive the dashboard. A score of 50 or more marks a resident "Keep an eye on", and two visits in a row at 70 or more mark them "Check soon". The resident page charts the scores across visits next to the plain measurements, so a caregiver can see what changed as well as what it resembles.
 
-The model was trained by the team on recordings of ourselves acting out each pattern, plus synthetic data. The trained checkpoint is committed at `ml/runs/pattern_model/model.pt`. The recordings are not in the repository, so a clone can run the model but not retrain it.
+**Why a model instead of fixed formulas?** Each pattern is a shape over time, not one number. Parkinson's slowness is movement that gets smaller and slower as it goes on [4]. Tremor is shake that shows up while the hand is moving [6]. Formulas with hand-picked cutoffs for speed or shake miss those shapes and break across people and games. The network learns them from examples. Stick Drift keeps the formulas for the readable numbers and uses the model for the patterns.
+
+The model was trained on recordings of the team acting out each pattern, plus synthetic data. The trained checkpoint is committed at `ml/runs/pattern_model/model.pt`.
 
 ## Research basis
 
-No published study uses a modern gamepad thumbstick for this exactly, so Stick Drift applies established movement measures to a cheap device people already enjoy. The work it builds on:
+**Measuring movement with game controllers is established research.** Off-the-shelf joysticks and game peripherals have been used to assess movement disorders for years. A standard game joystick and steering wheel told people with Parkinson's apart from healthy adults, and graded how slow their movements were, using tracking tasks much like Harbour Fishing [1]. A joystick graded arm impairment in stroke survivors [2]. Simple reaching tasks detected stroke deficits, most clearly as differences between the two arms [3]. Stick Drift applies the same measurements through a controller residents enjoy.
 
-**Joysticks and game peripherals for movement disorders**
+**What the model looks for comes from clinical criteria.** Each pattern is the movement sign clinicians use:
 
-- [Allen et al., 2007](https://eprints.whiterose.ac.uk/2663). An unmodified game joystick and steering wheel, with tracking tasks much like Harbour Fishing, told people with Parkinson's from controls and separated patients by how slow their movements were. It was small (13 patients, 5 controls), and it is the closest precedent for Stick Drift.
-- [Feng & Winters, 2009](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/). A joystick platform for stroke survivors. Accuracy, steadiness and speed consistency separated patients by level of arm impairment.
+- **Parkinson's:** the core sign is bradykinesia, slowness with movements that shrink or slow as they continue [4].
+- **Stroke:** sudden weakness on one side of the body is a key warning sign [5], which is why Apple Picking compares the two hands.
+- **Essential tremor:** defined by action tremor in both arms [6], which is why shake is measured while the hand moves.
 
-**Slower, smaller movements (Harbour Fishing and Apple Picking)**
+**These conditions are common in older adults, and catching them early matters.** About 6.1 million people had Parkinson's in 2016, more than double the 1990 figure, driven mainly by ageing populations [7]. Essential tremor affects about 1 in 20 people over 65 [8]. Stroke risk rises with age [9].
 
-- [Oishi et al.](https://digital-library.theiet.org/content/journals/10.1049/iet-cta.2010.0464) and [a study of submovements in manual tracking](https://cris.iucc.ac.il/en/publications/submovements-in-manual-tracking-people-with-parkinsons-disease-pr/). People with Parkinson's make more tracking errors and more small corrective movements when following a moving target.
-- [Giancardo et al., 2016 (neuroQWERTY)](https://www.physionet.org/content/nqmitcsxpd/1.0.0/MIT-CS1PD/data_MIT-CS1PD/). How long keys are held down during ordinary typing flagged early Parkinson's in 85 people.
-- [Deep learning on mPower tapping, 2022](https://pmc.ncbi.nlm.nih.gov/articles/PMC8763910). Smartphone tapping from 6,418 people identified Parkinson's with an AUC of 0.93.
-
-**One hand weaker than the other (Apple Picking's left-right comparison)**
-
-- [Coderre et al., 2010](https://pubmed.ncbi.nlm.nih.gov/20233965). A robotic reaching task with 52 subacute stroke patients and 91 controls. Differences between the two arms stood out even when each arm looked normal on its own, which is why Stick Drift compares the hands with each other.
-
-**Shake**
-
-- [White & Horvitz, 2019](https://pmc.ncbi.nlm.nih.gov/articles/PMC6760188). Hand tremor estimated from ordinary mouse-cursor movement across a large population matched self-reports and clinical findings. Thumbstick evidence for tremor is thin, which is why Stick Drift also records the PS5 controller's motion sensors.
-
-**Tracking older adults over time**
-
-- [Haynes et al., 2017](https://eprints.whiterose.ac.uk/116209/). A review of 22 long-term studies: older adults whose reaction times vary more from one try to the next are at higher risk of later cognitive decline and death.
-- [Seelye et al., 2015](https://experts.umn.edu/en/publications/computer-mouse-movement-patterns-a-potential-marker-of-mild-cogni/). A week of ordinary home mouse use showed measurable differences in people with mild cognitive impairment, a precedent for monitoring through everyday activity.
+1. [Allen et al., 2007](https://eprints.whiterose.ac.uk/2663). Low-cost computer peripherals for assessing motor dysfunction in Parkinson's.
+2. [Feng & Winters, 2009](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705666/). A joystick platform for upper-limb assessment after stroke.
+3. [Coderre et al., 2010](https://pubmed.ncbi.nlm.nih.gov/20233965). Visually guided reaching in subacute stroke.
+4. [Postuma et al., 2015](https://pubmed.ncbi.nlm.nih.gov/26474316/). MDS clinical diagnostic criteria for Parkinson's disease.
+5. [American Heart Association](https://cpr.heart.org/-/media/Files/Health-Topics/Answers-by-Heart/What-Are-the-Warning-Signs-of-Stroke.pdf). Warning signs of stroke.
+6. [Bhatia et al., 2018](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas). Consensus statement on the classification of tremors.
+7. [GBD 2016 Parkinson's Disease Collaborators, 2018](https://www.healthdata.org/node/6677). Global burden of Parkinson's disease, 1990–2016.
+8. [Louis & Ferreira, 2010](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8269764/). Worldwide prevalence of essential tremor (the link is the 2021 update, which also reports the 2010 figure).
+9. [CDC](https://www.cdc.gov/stroke/data-research/facts-stats/index.html). Stroke facts.
 
 ## Project structure
 
@@ -133,26 +129,23 @@ No published study uses a modern gamepad thumbstick for this exactly, so Stick D
 
 ## Run it locally
 
-- [Node.js 20](https://nodejs.org/) or newer
-- Python 3.14 and [uv](https://docs.astral.sh/uv/)
-- Postgres with the TimescaleDB extension: [Docker Desktop](https://www.docker.com/products/docker-desktop/) for a local one, or a free [Tiger Data](https://www.tigerdata.com/) service
-- Chrome or Edge, and a PS5 (DualSense) controller
+You need Node.js 20+, Python 3.14 with [uv](https://docs.astral.sh/uv/), a [Tiger Data](https://www.tigerdata.com/) service, Chrome or Edge, and a PS5 (DualSense) controller.
 
-**1. Database.** The quickest option is a local container:
+**1. Settings.** Copy `backend/.env.example` to `backend/.env` and fill it in. Do not commit `.env`.
+
+| Variable | What it is |
+|---|---|
+| `DATABASE_URL` | Your Tiger Data connection string |
+| `CAREGIVER_INVITE_CODE` | An access code you choose. Caregivers must enter it to sign up, because they can see every resident's results |
+| `GEMINI_API_KEY` | Optional. Turns on the Gemini assistant and the written part of the PDF |
+
+No Tiger Data account? Any Postgres with TimescaleDB works, for example a local one in Docker, with `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/stickdrift`:
 
 ```bash
 docker run -d --name stickdrift-db -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=stickdrift timescale/timescaledb:2.17.2-pg16
 ```
 
-**2. Settings.** Copy `backend/.env.example` to `backend/.env` and fill it in. Do not commit `.env`.
-
-| Variable | What it is |
-|---|---|
-| `DATABASE_URL` | The database connection string. For the container above: `postgresql://postgres:postgres@localhost:5432/stickdrift` |
-| `CAREGIVER_INVITE_CODE` | An access code you choose. Caregivers must enter it to sign up, because caregivers can see every resident's results. Leave it empty to turn caregiver sign-up off |
-| `GEMINI_API_KEY` | Optional. Turns on the Gemini assistant and the written part of the PDF |
-
-**3. API.** From the repository root:
+**2. API.** From the repository root:
 
 ```bash
 uv sync                                  # pattern model and hand replays (torch, numpy, ...)
@@ -162,7 +155,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --port 8000         # creates the tables on first start
 ```
 
-**4. Website.** In a second terminal, from the repository root:
+**3. Website.** In a second terminal, from the repository root:
 
 ```bash
 cd web
@@ -170,15 +163,10 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. Sign up as a resident and open the lobby from the home page. In a second browser profile or a private window, sign up as a caregiver at `/caregiver/signup` with your access code, and you can watch the resident play live.
+Open `http://localhost:5173`. Sign up as a resident and open the lobby from the home page. In a private window, sign up as a caregiver at `/caregiver/signup` with your access code to watch the resident play live.
 
-The Vite dev server forwards `/api`, including the live WebSocket, to the API on port 8000, so the browser sees a single origin.
-
-> [!TIP]
-> Without `GEMINI_API_KEY` everything still works: the assistant answers from fixed rules and the PDF uses template wording. Without an access code, run `python -m scripts.create_caregiver` in `backend/` for a caregiver login.
-
-> [!IMPORTANT]
-> The API runs the pattern model with `../.venv/bin/python`, the environment `uv sync` creates. On Windows, set `STICKDRIFT_ML_PYTHON` in `backend/.env` to the full path of `.venv\Scripts\python.exe`. If the API can't find it, visits are still saved but have no pattern scores or hand replay.
+> [!NOTE]
+> Without `GEMINI_API_KEY`, the assistant answers from fixed rules and the PDF uses template wording. Without an access code, run `python -m scripts.create_caregiver` in `backend/` for a caregiver login. On Windows, set `STICKDRIFT_ML_PYTHON` in `backend/.env` to the full path of `.venv\Scripts\python.exe`, or visits won't get model scores.
 
 To run the tests from the repository root:
 
