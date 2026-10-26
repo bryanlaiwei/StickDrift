@@ -4,7 +4,7 @@
 
 # Stick Drift
 
-Short, simple controller games designed for seniors in care homes. While a resident plays, a model reads how each hand moves, so their care team can catch early signs of motion-related diseases like Parkinson's, stroke and essential tremor.
+Short, simple controller games designed for seniors. While a resident plays, a model reads how each hand moves, so their care team can catch early signs of motion-related diseases like Parkinson's, stroke and essential tremor.
 
 <p align="center">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript" />
