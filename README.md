@@ -95,7 +95,7 @@ The model was trained on recordings of the team acting out each pattern, plus sy
 | Condition | Clinical sign the model looks for | How common |
 |---|---|---|
 | Parkinson's | Slowness, with movements that shrink as they continue [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/) | 6.1 million people in 2016, more than double 1990, driven by ageing [[7]](https://www.healthdata.org/node/6677) |
-| Stroke | Sudden weakness on one side of the body [[5]](https://cpr.heart.org/-/media/Files/Health-Topics/Answers-by-Heart/What-Are-the-Warning-Signs-of-Stroke.pdf) | Risk rises with age [[9]](https://www.cdc.gov/stroke/data-research/facts-stats/index.html) |
+| Stroke | Weakness on one side of the body [[5]](https://cpr.heart.org/-/media/Files/Health-Topics/Answers-by-Heart/What-Are-the-Warning-Signs-of-Stroke.pdf) | Risk rises with age [[9]](https://www.cdc.gov/stroke/data-research/facts-stats/index.html) |
 | Essential tremor | Shake in both arms while moving [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas) | About 1 in 20 people over 65 [[8]](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8269764/) |
 
 1. [Allen et al., 2007](https://eprints.whiterose.ac.uk/2663). Low-cost computer peripherals for assessing motor dysfunction in Parkinson's.
