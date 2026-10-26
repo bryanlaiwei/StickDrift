@@ -172,7 +172,7 @@ MPLBACKEND=Agg .venv/bin/python -m unittest discover -s tests/ml -t .
 cd web && npm test && npm run lint && npm run build
 ```
 
-## Limitations
+## Scope and limitations
 
 - Stick Drift is a hackathon prototype, not a medical device, and it has not been clinically validated. The thresholds are design choices, not clinical cutoffs.
 - The pattern model was trained only on the team acting out each pattern and on synthetic data, never on patients.
