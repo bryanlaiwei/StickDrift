@@ -65,8 +65,6 @@ These scores drive the dashboard. A score of 50 or more marks a resident "Keep a
 
 **Why a model instead of fixed formulas?** Because these signs are hard to write down as formulas. Parkinson's slowness shows up as movements that shrink and slow as they continue [[4]](https://pubmed.ncbi.nlm.nih.gov/26474316/), and tremor as shake that appears only while the hand moves [[6]](https://utsouthwestern.elsevierpure.com/en/publications/consensus-statement-on-the-classification-of-tremors-from-the-tas). A formula would need a hand-picked cutoff for each of these, which would be guesses. The model instead learns each pattern from labelled examples.
 
-The model was trained on recordings of the team acting out each pattern, plus synthetic data. The trained checkpoint is committed at `ml/runs/pattern_model/model.pt`.
-
 ## What you can do
 
 **Residents** sign up with a nickname, open the lobby and walk to a game:
