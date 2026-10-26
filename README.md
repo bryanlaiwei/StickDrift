@@ -77,8 +77,6 @@ The model was trained on recordings of the team acting out each pattern, plus sy
 - **Harbour Fishing:** trace a fish's path with the rod tip, one hand at a time.
 - **Rat Catching:** flick a stick to catch the target rat, and hold back for the others.
 
-Each game shows a score and up to three stars. Those are just for fun.
-
 **Caregivers** sign up with the care team's access code, then:
 
 - See every resident on one dashboard, marked "No concerns", "Keep an eye on" or "Check soon", plus who is playing right now.
